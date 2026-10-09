@@ -14,6 +14,94 @@
 </head>
 <body>
 <div id="game"></div>
+
+<div id="hud" class="hidden">
+  <div id="enemy-panel">
+    <div class="name" id="enemy-name">ENEMY</div>
+    <div class="bar"><div class="fill hp" id="enemy-hp"></div></div>
+  </div>
+  <div id="round-info">
+    <div id="round-dots-p" class="dots"></div>
+    <div id="timer">99</div>
+    <div id="round-dots-e" class="dots"></div>
+  </div>
+  <div id="player-panel">
+    <div class="name" id="player-name">PLAYER</div>
+    <div class="hpnum"><span id="player-hpnum">600</span></div>
+    <div class="bar"><div class="fill hp" id="player-hp"></div></div>
+    <div class="label">BOOST</div>
+    <div class="bar boost"><div class="fill" id="player-boost"></div></div>
+  </div>
+  <div id="weapon-panel">
+    <div class="weapon" id="w-rifle"><span class="key">J</span><span class="wname"></span><span class="ammo"></span><div class="reload"><div></div></div></div>
+    <div class="weapon" id="w-missile"><span class="key">L</span><span class="wname"></span><span class="ammo"></span><div class="reload"><div></div></div></div>
+    <div class="weapon" id="w-melee"><span class="key">K</span><span class="wname"></span><span class="ammo">&#8734;</span></div>
+    <div class="weapon" id="w-special"><span class="key">I</span><span class="wname"></span><span class="ammo"></span><div class="reload"><div></div></div></div>
+  </div>
+  <div id="lock"><div class="ring"></div><div class="dist"></div></div>
+  <div id="alert">ALERT</div>
+  <div id="center-msg"></div>
+  <div id="dmg-layer"></div>
+  <div id="hint">WASD 移動 / Space ブースト / 方向2回 ステップ / J 射撃 / K 格闘 / L ミサイル / I 特殊射撃 / Esc ポーズ</div>
+</div>
+
+<div id="title" class="screen">
+  <div class="logo">MECHA<span>VERSUS</span></div>
+  <div class="sub">1 on 1 HIGH-SPEED MECHA ACTION</div>
+  <div class="menu" id="title-menu">
+    <button data-act="start">START</button>
+    <button data-act="difficulty">CPU: <span id="diff-label">NORMAL</span></button>
+    <button data-act="controls">CONTROLS</button>
+  </div>
+  <div class="foot">Enter / A で決定・W/S で選択</div>
+</div>
+
+<div id="controls" class="screen hidden">
+  <h2>CONTROLS</h2>
+  <table>
+    <tr><th>操作</th><th>キーボード</th><th>ゲームパッド</th></tr>
+    <tr><td>移動</td><td>W A S D</td><td>左スティック</td></tr>
+    <tr><td>ジャンプ / ブースト上昇</td><td>Space (長押しで上昇)</td><td>A</td></tr>
+    <tr><td>ブーストダッシュ</td><td>Space + 方向 / 方向2回押しのまま保持</td><td>A + スティック</td></tr>
+    <tr><td>ステップ (誘導切り)</td><td>方向キーを素早く2回</td><td>LB + スティック</td></tr>
+    <tr><td>ビームライフル</td><td>J</td><td>X / RT</td></tr>
+    <tr><td>格闘 (3段)</td><td>K 連打</td><td>B</td></tr>
+    <tr><td>ミサイル</td><td>L</td><td>Y</td></tr>
+    <tr><td>特殊射撃 (チャージ)</td><td>I</td><td>RB</td></tr>
+    <tr><td>ポーズ</td><td>Esc / P</td><td>Start</td></tr>
+  </table>
+  <p>ロックオンは自動。距離が近いと赤ロック（弾が誘導）、遠いと緑ロック（誘導なし）。ブーストを使い切るとオーバーヒートして着地硬直が長くなる。</p>
+  <div class="menu"><button data-act="back">BACK</button></div>
+</div>
+
+<div id="select" class="screen hidden">
+  <h2>MECH SELECT</h2>
+  <div class="cards">
+    <div class="card" data-mech="kestrel"></div>
+    <div class="card" data-mech="grendel"></div>
+  </div>
+  <div class="foot">A/D で選択 ・ Enter で出撃 ・ Backspace で戻る</div>
+</div>
+
+<div id="pause" class="screen hidden">
+  <h2>PAUSE</h2>
+  <div class="menu" id="pause-menu">
+    <button data-act="resume">RESUME</button>
+    <button data-act="quit">QUIT TO TITLE</button>
+  </div>
+</div>
+
+<div id="result" class="screen hidden">
+  <div class="big" id="result-title">YOU WIN</div>
+  <div id="result-score"></div>
+  <div id="result-stats"></div>
+  <div class="menu" id="result-menu">
+    <button data-act="rematch">REMATCH</button>
+    <button data-act="select">MECH SELECT</button>
+    <button data-act="title">TITLE</button>
+  </div>
+</div>
+
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

@@ -40,6 +40,7 @@ export class Input {
       if (e.repeat) return;
       this.held.add(a);
       this.pressedSet.add(a);
+      if (a === 'boost') this.pressedSet.add('confirm'); // Space also confirms in menus
       if (DIRS[a]) {
         const now = performance.now();
         if (this.lastTap[a] && now - this.lastTap[a] < DOUBLE_TAP_MS) {
