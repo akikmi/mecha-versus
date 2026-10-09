@@ -1,0 +1,4 @@
+html, body { margin: 0; height: 100%; overflow: hidden; background: #05070c; color: #e8f0ff;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+#game { position: fixed; inset: 0; }
+canvas { display: block; }
