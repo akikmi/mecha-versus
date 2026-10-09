@@ -137,6 +137,16 @@ export class SFX {
         this.hiss('lowpass', 3000, 300, 1.0, 0.4 * v);
         this.tone('sine', 70, 30, 0.8, 0.45 * v);
         break;
+      case 'guard':
+        this.tone('square', 1400, 900, 0.09, 0.14 * v, 0, { type: 'bandpass', freq: 1800 });
+        this.tone('triangle', 2400, 2200, 0.25, 0.1 * v, 0.01);
+        this.hiss('highpass', 5000, 3000, 0.08, 0.18 * v);
+        break;
+      case 'overdrive':
+        this.tone('sawtooth', 110, 880, 0.6, 0.2 * v, 0, { type: 'lowpass', freq: 2600 });
+        this.tone('triangle', 220, 1760, 0.6, 0.14 * v, 0.05);
+        this.hiss('bandpass', 400, 4000, 0.7, 0.25 * v, 0, 1.2);
+        break;
       case 'ui':
         this.tone('square', 880, 1320, 0.08, 0.12 * v, 0, { type: 'lowpass', freq: 3000 });
         break;

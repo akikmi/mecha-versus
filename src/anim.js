@@ -38,6 +38,22 @@ const SWINGS = [
     [1, { armRX: -0.3, armRZ: 0.1, foreRX: -0.2, handRX: 0.8, torsoX: 0.45, rootX: 0.2, legLX: -0.7, shinL: 0.8, legRX: 0.4, shinR: 0.5, hipY: -0.3 }]],
 ];
 
+// N finisher: rising launcher swing
+const LAUNCH = [[0, { armRX: 0.5, armRZ: 0.3, foreRX: -0.3, handRX: 1.3, torsoX: 0.35, rootX: 0.2, hipY: -0.4, legLX: -0.6, shinL: 0.9, legRX: 0.4, shinR: 0.8 }],
+  [0.3, { armRX: 0.7, armRZ: 0.3, foreRX: -0.2, handRX: 1.3, torsoX: 0.45, rootX: 0.25, hipY: -0.5, legLX: -0.7, shinL: 1.0, legRX: 0.45, shinR: 0.9 }],
+  [0.55, { armRX: -2.7, armRZ: 0.2, foreRX: -0.3, handRX: 0.5, torsoX: -0.3, rootX: -0.15, hipY: 0.05, legLX: -0.3, shinL: 0.3, legRX: 0.2, shinR: 0.3 }],
+  [1, { armRX: -2.9, armRZ: 0.25, foreRX: -0.4, handRX: 0.4, torsoX: -0.25, rootX: -0.1 }]];
+// side finisher: wide spinning blow
+const BLOW = [[0, { armRX: -1.2, armRZ: 1.6, foreRX: -0.5, handRX: 1.4, torsoY: 1.0, torsoX: 0.1, rootX: 0.1, rootZ: 0.15 }],
+  [0.3, { armRX: -1.3, armRZ: 1.7, foreRX: -0.4, handRX: 1.4, torsoY: 1.15, rootZ: 0.2 }],
+  [0.55, { armRX: -1.6, armRZ: -1.3, foreRX: 0, handRX: 1.5, torsoY: -1.0, torsoX: 0.25, rootX: 0.25, rootZ: -0.2 }],
+  [1, { armRX: -1.1, armRZ: -1.4, foreRX: -0.3, handRX: 1.3, torsoY: -1.1, torsoX: 0.2, rootX: 0.15 }]];
+// forward melee: lunging thrust
+const THRUST = [[0, { armRX: -0.9, armRZ: 0.35, foreRX: -1.6, handRX: 2.4, torsoY: 0.5, rootX: 0.1, legLX: -0.6, shinL: 0.7, legRX: 0.5, shinR: 0.6 }],
+  [0.3, { armRX: -0.8, armRZ: 0.4, foreRX: -1.8, handRX: 2.5, torsoY: 0.6, rootX: 0.15, legLX: -0.7, shinL: 0.8, legRX: 0.55, shinR: 0.7 }],
+  [0.5, { armRX: -1.6, armRZ: 0.05, foreRX: 0, handRX: 1.57, torsoY: -0.35, torsoX: 0.3, rootX: 0.4, hipY: -0.3, legLX: -0.9, shinL: 0.9, legRX: 0.7, shinR: 0.5 }],
+  [1, { armRX: -1.5, armRZ: 0.05, foreRX: -0.1, handRX: 1.5, torsoY: -0.3, torsoX: 0.25, rootX: 0.3, hipY: -0.3, legLX: -0.8, shinL: 0.8, legRX: 0.6, shinR: 0.5 }]];
+
 function sampleKeys(keys, t, pose) {
   let i = 0;
   while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
@@ -124,15 +140,26 @@ export class Animator {
       stiff = 420;
     } else if (st === 'melee') {
       stiff = 700;
-      if (mech.meleePhase === 'lunge') {
+      if (mech.meleePhase === 'lunge' && mech.meleeKind === 's') {
+        // curving approach: bank into the turn, saber held low and back
+        P.rootX = 0.4; P.rootZ = -mech.meleeSide * 0.45; P.armRX = 0.6; P.armRZ = 0.5; P.handRX = 0.8; P.torsoY = 0.4 * mech.meleeSide;
+        P.legLX = 0.3; P.legRX = 0.6; P.shinL = 0.6; P.shinR = 0.9; P.footL = 0.5; P.footR = 0.5; P.armLZ = -0.6;
+      } else if (mech.meleePhase === 'lunge') {
         P.rootX = 0.55; P.armRX = 0.7; P.armRZ = 0.4; P.foreRX = -0.4; P.handRX = 0.6; P.armLX = 0.4; P.armLZ = -0.4;
         P.legLX = 0.4; P.legRX = 0.7; P.shinL = 0.7; P.shinR = 1.0; P.footL = 0.5; P.footR = 0.5; P.torsoY = 0.3;
       } else {
-        const dur = mech.stats.melee.swing + (mech.meleeStage === 2 ? 0.15 : 0);
-        sampleKeys(SWINGS[clamp(mech.meleeStage, 0, 2)], clamp(mech.stateT / dur, 0, 1), P);
+        const dur = mech.meleeDur();
+        const st = clamp(mech.meleeStage, 0, 2), kind = mech.meleeKind;
+        const keys = kind === 'f' ? THRUST : st < 2 ? SWINGS[st] : kind === 's' ? BLOW : LAUNCH;
+        sampleKeys(keys, clamp(mech.stateT / dur, 0, 1), P);
         P.armLX = -0.3; P.armLZ = -0.5; P.foreLX = -1.0;
         if (!mech.onGround) { P.legLX = -0.4; P.shinL = 0.8; P.legRX = 0.3; P.shinR = 0.7; P.footL = 0.3; P.footR = 0.3; }
       }
+    } else if (st === 'guard') {
+      stiff = 600;
+      if (mech.typeId === 'kestrel') { P.armLX = -1.35; P.armLZ = 0.55; P.foreLX = -0.9; P.handLX = 0; P.torsoY = 0.35; P.armRX = 0.3; P.armRZ = 0.4; }
+      else { P.armLX = -1.3; P.armLZ = 0.8; P.armRX = -1.3; P.armRZ = -0.8; P.foreLX = -1.4; P.foreRX = -1.4; P.torsoX = 0.2; }
+      P.hipY = -0.3; P.legLX = -0.45; P.shinL = 0.6; P.legRX = 0.35; P.shinR = 0.6; P.rootX = -0.05;
     } else if (mech.onGround && (st === 'free' || st === 'turnshot')) {
       if (mech.landLag > 0.03) {
         stiff = 520;
@@ -271,7 +298,7 @@ export class Animator {
         else mat.emissive.setRGB(e * 1.2, e * 0.35, e * 0.9);
       }
     }
-    root.visible = !(mech.invuln > 0 && Math.floor(mech.invuln * 20) % 2 === 0);
+    root.visible = !mech.hidden && !(mech.invuln > 0 && Math.floor(mech.invuln * 20) % 2 === 0);
   }
 
   apply() {

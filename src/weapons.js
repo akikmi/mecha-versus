@@ -124,6 +124,14 @@ export class Weapons {
 
   meleeHit(attacker, target, hit) {
     const dmg = target.takeHit(hit, attacker);
+    if (dmg === 0 && target.guardHit) {
+      target.guardHit = false;
+      const at = target.center.clone().addScaledVector(target.forward(), 1.4);
+      this.world.fx?.guardSpark(at);
+      this.world.audio?.play('guard');
+      this.world.hitStop?.(0.05);
+      return;
+    }
     if (dmg > 0) {
       const at = target.center.clone();
       // hit stop: freeze both mechs for a few frames (longer on the finisher)
@@ -173,8 +181,9 @@ export class Weapons {
         // center the beam body behind its head
         p.obj.position.addScaledVector(p.vel.clone().normalize(), -(p.kind === 'special' ? 9 : 2.5));
       }
-      if (p.kind === 'missile') world.fx?.trail(p.pos, 0xffbb66, 0.35, 0.3);
-      if (p.kind === 'special') world.fx?.trail(p.pos, p.color, 1.2, 0.3);
+      if (p.kind === 'missile') { world.fx?.trail(p.pos, 0xffbb66, 0.35, 0.3); if (Math.random() < 0.5) world.fx?.puff(p.pos, tmp2.set(0, 0.5, 0), 0x8a8480, 0.35, 0.7, 2.5); }
+      if (p.kind === 'special') { world.fx?.trail(p.pos, p.color, 1.2, 0.3); world.fx?.beamTrail(p.prev, p.pos, p.color, 1.0); }
+      if (p.kind === 'beam') world.fx?.beamTrail(p.prev, p.pos, p.color, p.radius * 0.7);
 
       let dead = p.life <= 0;
       // hit mechs (anyone that isn't the owner)
@@ -185,7 +194,15 @@ export class Weapons {
           const d = segPointDist(p.prev, p.pos, m.center);
           if (d < 2.0 + p.radius) {
             const knock = p.vel.clone().setY(0).normalize();
-            const dmg = m.takeHit({ ...p.hit, knock }, p.owner);
+            const dmg = m.takeHit({ ...p.hit, knock, from: p.prev }, p.owner);
+            if (dmg === 0 && m.guardHit) {
+              // blocked by a shield guard: the shot is absorbed (even a piercing one)
+              m.guardHit = false;
+              world.fx?.guardSpark(p.pos.clone());
+              world.audio?.play('guard');
+              dead = true;
+              break;
+            }
             if (dmg > 0) {
               const at = m.center.clone();
               world.fx?.hitSpark(at, p.color);

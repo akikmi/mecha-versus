@@ -5,6 +5,8 @@ import { Animator } from './anim.js';
 export const GRAVITY = 32;
 export const MAX_HP = 600;
 const DOWN_THRESHOLD = 5;
+export const OD_MAX = 100;
+export const OD_TIME = 8;
 export const TWIST_MAX = THREE.MathUtils.degToRad(100); // upper-body twist limit
 
 export const STATS = {
@@ -87,7 +89,12 @@ export class Mech {
     this.hitDir = new THREE.Vector3(0, 0, 1);
     this.dashDir = new THREE.Vector3(0, 0, 1);
     this.turnRate = 0;
+    this.hidden = false;
     this.overdriveT = 0;
+    this.od = 0;
+    this.guardHit = false;
+    this.meleeKind = 'n';
+    this.meleeSide = 1;
     this.model.saber.visible = false;
     this.model.root.rotation.set(0, yaw, 0);
     this.model.root.position.copy(pos);
@@ -102,6 +109,9 @@ export class Mech {
   get aimYaw() { return this.yaw + this.twist; }
   // fast movement states (camera FOV widening, AI)
   get dashing() { return this.state === 'bd' || this.state === 'step'; }
+  // OVERDRIVE: mobility multiplier and damage bonus
+  get mul() { return this.overdriveT > 0 ? 1.2 : 1; }
+  get odReady() { return this.od >= OD_MAX && this.overdriveT <= 0; }
 
   distTo(m) { return this.pos.distanceTo(m.pos); }
   isRedLock() { return this.target && this.distTo(this.target) <= this.stats.redRange; }
@@ -119,6 +129,8 @@ export class Mech {
     this.aimT = Math.max(0, this.aimT - dt);
     this.flash = Math.max(0, this.flash - dt);
     this.boosting = false;
+    if (this.overdriveT > 0) this.overdriveT = Math.max(0, this.overdriveT - dt);
+    if (cmd.overdrive && this.odReady && !this.dead && this.state !== 'down') this.activateOverdrive(world);
     if (!this.dead && this.state !== 'special') this.charge = Math.min(this.stats.special.charge, this.charge + dt);
 
     // ammo regen
@@ -164,6 +176,9 @@ export class Mech {
       case 'special':
         gravity = false;
         this.updateSpecial(dt, cmd, world);
+        break;
+      case 'guard':
+        gravity = this.updateGuard(dt, cmd, world);
         break;
       default:
         gravity = this.updateFree(dt, cmd, world);
@@ -212,7 +227,7 @@ export class Mech {
   }
 
   useBoost(amount) {
-    this.boost -= amount;
+    this.boost -= amount * (this.overdriveT > 0 ? 0.6 : 1);
     if (this.boost <= 0) { this.boost = 0; this.overheat = true; }
   }
 
@@ -224,12 +239,24 @@ export class Mech {
     this.yaw += angleDiff(this.yaw, want) * Math.min(1, rate * dt);
   }
 
+  activateOverdrive(world) {
+    this.overdriveT = OD_TIME;
+    this.od = 0;
+    this.boost = this.stats.boostMax;
+    this.overheat = false;
+    this.invuln = Math.max(this.invuln, 0.5);
+    this.landLag = 0;
+    if (this.state === 'hitstun') { this.setState('free'); this.vel.multiplyScalar(0.2); } // burst out of a combo
+    world.audio?.play('overdrive', this.isPlayer ? 1 : 0.7);
+    world.onOverdrive?.(this);
+  }
+
   // Common action checks usable from free / bd / step.
   tryActions(cmd, world, allow = {}) {
     if (cmd.step && this.canDash() && allow.step !== false) { this.startStep(cmd.step, world); return true; }
     if (cmd.bd && this.canDash() && allow.bd !== false) { this.startBD(cmd, world); return true; }
     if (cmd.special && this.specialReady && this.target) { this.setState('special'); this.fired = false; this.charge = 0; world.audio?.play('charge'); return true; }
-    if (cmd.melee && this.target) { this.startMelee(world); return true; }
+    if (cmd.melee && this.target) { this.startMelee(world, cmd.meleeDir, cmd.meleeSide); return true; }
     if (cmd.shoot && this.ammo.rifle > 0 && this.cd <= 0 && this.target) return this.shoot('rifle', world);
     if (cmd.missile && this.ammo.missile > 0 && this.cd <= 0 && this.target) return this.shoot('missile', world);
     return false;
@@ -268,7 +295,7 @@ export class Mech {
     const mv = cmd.move;
     const mvLen = Math.hypot(mv.x, mv.z);
     if (cmd.boostPressed && this.onGround && !this.overheat && this.boost > 0) {
-      this.vel.y = s.jump; this.onGround = false; this.useBoost(5);
+      this.vel.y = s.jump * this.mul; this.onGround = false; this.useBoost(5);
       world.audio?.play('jump');
     }
     const canBoost = cmd.boost && !this.overheat && this.boost > 0 && !this.onGround;
@@ -276,13 +303,13 @@ export class Mech {
     if (canBoost) {
       // boost rise. Horizontal speed is preserved (inertial jump after a BD), input only steers.
       this.boosting = true;
-      this.vel.y = approach(this.vel.y, s.rise, 60 * dt);
+      this.vel.y = approach(this.vel.y, s.rise * this.mul, 60 * dt);
       this.airSteer(dt, mv, mvLen, hs, 0.3, 1.6);
       this.useBoost(24 * dt);
       return false;
     }
     if (this.onGround) {
-      const sp = s.walk * (this.aimT > 0 ? 0.7 : 1);
+      const sp = s.walk * this.mul * (this.aimT > 0 ? 0.7 : 1);
       const k = 1 - Math.exp(-10 * dt);
       this.vel.x += (mv.x * sp - this.vel.x) * k;
       this.vel.z += (mv.z * sp - this.vel.z) * k;
@@ -311,7 +338,7 @@ export class Mech {
     this.stepDir = new THREE.Vector3(dir.x, 0, dir.z).normalize();
     this.stepSerial++; // cuts homing of everything aimed at us
     this.useBoost(12);
-    this.vel.set(this.stepDir.x * s.stepSpeed, 0, this.stepDir.z * s.stepSpeed);
+    this.vel.set(this.stepDir.x * s.stepSpeed * this.mul, 0, this.stepDir.z * s.stepSpeed * this.mul);
     this.landLag = 0;
     this.meleeQueued = false;
     this.model.saber.visible = false;
@@ -322,7 +349,7 @@ export class Mech {
     const s = this.stats;
     this.boosting = true;
     if (this.target) this.faceTarget(dt, 8);
-    const sp = s.stepSpeed * (this.stateT < 0.2 ? 1 : 0.6);
+    const sp = s.stepSpeed * this.mul * (this.stateT < 0.2 ? 1 : 0.6);
     this.vel.x = this.stepDir.x * sp; this.vel.z = this.stepDir.z * sp;
     this.vel.y = 0;
     // step -> BD cancel, moving shots during a step
@@ -344,7 +371,7 @@ export class Mech {
     this.landLag = 0;
     this.meleeQueued = false;
     this.model.saber.visible = false;
-    this.vel.x = this.dashDir.x * s.dash * 0.9; this.vel.z = this.dashDir.z * s.dash * 0.9;
+    this.vel.x = this.dashDir.x * s.dash * this.mul * 0.9; this.vel.z = this.dashDir.z * s.dash * this.mul * 0.9;
     this.vel.y = Math.max(this.vel.y, this.onGround ? 1.5 : 0);
     world.audio?.play('step');
   }
@@ -365,8 +392,8 @@ export class Mech {
       this.dashDir.set(Math.sin(a), 0, Math.cos(a));
     } else this.turnRate = 0;
     const k = 1 - Math.exp(-8 * dt);
-    this.vel.x += (this.dashDir.x * s.dash - this.vel.x) * k;
-    this.vel.z += (this.dashDir.z * s.dash - this.vel.z) * k;
+    this.vel.x += (this.dashDir.x * s.dash * this.mul - this.vel.x) * k;
+    this.vel.z += (this.dashDir.z * s.dash * this.mul - this.vel.z) * k;
     this.vel.y = approach(this.vel.y, -0.4, 30 * dt);
     this.useBoost(28 * dt);
     if (this.tryActions(cmd, world, { bd: false })) return;
@@ -394,21 +421,33 @@ export class Mech {
   }
 
   // ---------------------------------------------------------------- melee
-  startMelee(world) {
+  // kind: 'n' neutral 3-hit (finisher launches), 's' side (curving approach, finisher blows away),
+  //       'f' forward thrust (single heavy hit), 'b' back = shield guard
+  startMelee(world, kind = 'n', side = 1) {
+    if (kind === 'b') { this.startGuard(world); return; }
     this.setState('melee');
+    this.meleeKind = kind || 'n';
+    this.meleeSide = side || 1;
     this.meleeStage = 0;
     this.meleeQueued = false;
     this.meleeHitDone = false;
     this.swingSfx = false;
     const t = this.target;
     const d = t ? this.distTo(t) : 99;
-    this.meleePhase = t && t.alive && d <= this.stats.melee.range && d > 3 ? 'lunge' : 'swing';
+    const range = this.stats.melee.range * (kind === 'f' ? 1.2 : 1);
+    this.meleePhase = t && t.alive && d <= range && d > 3 ? 'lunge' : 'swing';
     this.lungeSerial = t ? t.stepSerial : 0;
     this.model.saber.visible = true;
     world.audio?.play('saberOn');
   }
 
   endMelee() { this.model.saber.visible = false; }
+
+  meleeDur() {
+    const m = this.stats.melee;
+    if (this.meleeKind === 'f') return m.swing + 0.12;
+    return m.swing + (this.meleeStage === 2 ? 0.15 : 0);
+  }
 
   updateMelee(dt, cmd, world) {
     const m = this.stats.melee;
@@ -431,23 +470,29 @@ export class Mech {
       const homing = t && t.alive && t.stepSerial === this.lungeSerial;
       if (homing) {
         tmpV.copy(t.pos).sub(this.pos);
-        tmpV.y = (t.pos.y - this.pos.y);
-        const dist = tmpV.length();
-        tmpV.normalize();
-        this.vel.copy(tmpV).multiplyScalar(m.lunge);
-        this.yaw = Math.atan2(tmpV.x, tmpV.z);
-        if (dist < this.stats.radius + t.stats.radius + 0.8) { this.meleePhase = 'swing'; this.stateT = 0; }
+        const dy = t.pos.y - this.pos.y;
+        tmpV.y = 0;
+        const dist = Math.hypot(tmpV.length(), dy);
+        const flat = tmpV.length();
+        let a = Math.atan2(tmpV.x, tmpV.z);
+        // side melee: curve around the target (sidesteps shots without a step)
+        if (this.meleeKind === 's') a += this.meleeSide * clamp(flat / m.range, 0, 1) * 1.15;
+        const sp = m.lunge * this.mul * (this.meleeKind === 'f' ? 1.3 : this.meleeKind === 's' ? 1.05 : 1);
+        this.vel.set(Math.sin(a) * sp, clamp(dy * 3, -sp, sp), Math.cos(a) * sp);
+        this.yaw = this.meleeKind === 's' ? Math.atan2(t.pos.x - this.pos.x, t.pos.z - this.pos.z) : a;
+        if (dist < this.stats.radius + t.stats.radius + (this.meleeKind === 'f' ? 1.6 : 0.8)) { this.meleePhase = 'swing'; this.stateT = 0; }
       }
-      if (this.stateT > 0.8) { this.meleePhase = 'swing'; this.stateT = 0; }
+      if (this.stateT > (this.meleeKind === 's' ? 1.0 : 0.8)) { this.meleePhase = 'swing'; this.stateT = 0; }
       return;
     }
     // swing
-    const dur = m.swing + (this.meleeStage === 2 ? 0.15 : 0);
+    const dur = this.meleeDur();
     if (this.stateT < 0.1 && t) this.faceTarget(dt, 20);
     this.vel.multiplyScalar(Math.exp(-10 * dt));
     if (this.stateT < 0.08) {
       this.forward(tmpV);
-      this.vel.x = tmpV.x * 8; this.vel.z = tmpV.z * 8;
+      const push = this.meleeKind === 'f' ? 16 : 8;
+      this.vel.x = tmpV.x * push; this.vel.z = tmpV.z * push;
     }
     if (!this.swingSfx) { this.swingSfx = true; world.audio?.play('swing'); }
     const active = this.stateT >= dur * 0.3 && this.stateT <= dur * 0.6;
@@ -457,17 +502,21 @@ export class Mech {
       tmpV.y = 0;
       const dist = tmpV.length();
       const ang = Math.abs(angleDiff(this.yaw, Math.atan2(tmpV.x, tmpV.z)));
-      if (dist < m.hitRange && dy < 4 && ang < 1.3) {
+      const reach = m.hitRange * (this.meleeKind === 'f' ? 1.3 : 1);
+      if (dist < reach && dy < 4 && ang < 1.3) {
         this.meleeHitDone = true;
         const st = this.meleeStage;
         const knock = tmpV.normalize().clone();
+        const fin = this.meleeKind === 'f' || st === 2;
         world.weapons?.meleeHit(this, t, {
-          dmg: m.dmg[st], dv: m.dv[st], scale: 0.9, knock, stun: 0.6, forceDown: st === 2, melee: true, stage: st,
+          dmg: this.meleeKind === 'f' ? Math.round(m.dmg[2] * 1.05) : m.dmg[st],
+          dv: this.meleeKind === 'f' ? 6 : m.dv[st], scale: 0.9, knock, stun: 0.6, forceDown: fin, melee: true, stage: fin ? 2 : st,
+          launch: this.meleeKind === 'n' && st === 2, blow: (this.meleeKind === 's' && st === 2) || this.meleeKind === 'f',
         });
       }
     }
     if (this.stateT >= dur) {
-      if (this.meleeQueued && this.meleeStage < 2) {
+      if (this.meleeQueued && this.meleeStage < 2 && this.meleeKind !== 'f') {
         this.meleeStage++;
         this.meleeQueued = false;
         this.meleeHitDone = false;
@@ -480,6 +529,31 @@ export class Mech {
         this.setState('free');
       }
     }
+  }
+
+  // ---------------------------------------------------------------- shield guard (back + melee)
+  startGuard(world) {
+    this.setState('guard');
+    this.model.saber.visible = false;
+    world.audio?.play('step', 0.6);
+  }
+
+  // Blocks shots and melee from the front (+-75 deg) for its duration.
+  isGuarding(from) {
+    if (this.state !== 'guard' || this.stateT > 0.85) return false;
+    return Math.abs(angleDiff(this.yaw, Math.atan2(from.x - this.pos.x, from.z - this.pos.z))) < 1.3;
+  }
+
+  updateGuard(dt, cmd, world) {
+    this.vel.x *= Math.exp(-8 * dt); this.vel.z *= Math.exp(-8 * dt);
+    if (!this.onGround) this.vel.y = approach(this.vel.y, -2, 30 * dt);
+    this.faceTarget(dt, 14);
+    if (this.stateT > 0.2) {
+      if (cmd.step && this.canDash()) { this.startStep(cmd.step, world); return false; }
+      if (cmd.bd && this.canDash()) { this.startBD(cmd, world); return false; }
+    }
+    if (this.stateT >= 0.95) this.setState('free');
+    return false;
   }
 
   // ---------------------------------------------------------------- special (stop shot)
@@ -503,7 +577,19 @@ export class Mech {
   // ---------------------------------------------------------------- damage
   takeHit(hit, attacker) {
     if (!this.canBeHit) return 0;
-    const dmg = Math.max(1, Math.round(hit.dmg * this.comboScale));
+    // shield guard: block hits from the front (projectiles use their position, melee the attacker's)
+    const from = hit.from || attacker.pos;
+    if (this.isGuarding(from)) {
+      this.guardHit = true;
+      this.stateT = Math.min(this.stateT, 0.5); // a blocked hit extends the guard a little
+      if (hit.melee) { attacker.vel.multiplyScalar(-0.3); attacker.endMelee?.(); attacker.setState('hitstun'); attacker.hitstunT = 0.35; }
+      return 0;
+    }
+    const odMul = attacker && attacker.overdriveT > 0 ? 1.15 : 1;
+    const dmg = Math.max(1, Math.round(hit.dmg * this.comboScale * odMul));
+    // OVERDRIVE gauge fills both when dealing and taking damage
+    if (this.overdriveT <= 0) this.od = Math.min(OD_MAX, this.od + dmg * 0.2);
+    if (attacker && attacker.overdriveT <= 0) attacker.od = Math.min(OD_MAX, attacker.od + dmg * 0.14);
     this.comboScale = Math.max(0.15, this.comboScale * hit.scale);
     this.recoverT = 0;
     this.hp = Math.max(0, this.hp - dmg);
@@ -519,7 +605,9 @@ export class Mech {
       this.onGround = false;
     } else if (this.downValue >= DOWN_THRESHOLD || hit.forceDown) {
       this.setState('down');
-      this.vel.set(knock.x * 13, 9, knock.z * 13);
+      if (hit.launch) this.vel.set(knock.x * 4, 17, knock.z * 4); // launcher: knocked up into the air
+      else if (hit.blow) this.vel.set(knock.x * 28, 7, knock.z * 28); // blow-away
+      else this.vel.set(knock.x * 13, 9, knock.z * 13);
       this.onGround = false;
       this.downValue = 0;
     } else {

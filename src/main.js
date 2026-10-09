@@ -5,7 +5,7 @@ import { Mech, STATS } from './mech.js';
 import { buildMechModel, MECH_TYPES } from './mechModels.js';
 import { Animator } from './anim.js';
 import { FollowCamera } from './camera.js';
-import { FX } from './fx.js';
+import { FX, MechTrails } from './fx.js';
 import { Weapons } from './weapons.js';
 import { AIController, DIFFICULTY } from './ai.js';
 import { HUD } from './hud.js';
@@ -47,6 +47,7 @@ const hud = new HUD();
 
 const world = { arena, scene, mechs: [] };
 world.fx = new FX(scene);
+world.fx.screenFlash = (v) => hud.flash(v);
 world.weapons = new Weapons(scene, world);
 world.audio = new SFX(settings.muted);
 
@@ -167,6 +168,7 @@ function otherMech(id) { return id === 'kestrel' ? 'grendel' : 'kestrel'; }
 function endBattle() {
   if (!battle) return;
   for (const m of [battle.player, battle.enemy]) scene.remove(m.model.root);
+  for (const t of battle.trails) t.dispose();
   world.weapons.clear();
   world.fx.clear();
   world.mechs = [];
@@ -183,7 +185,9 @@ function startBattle() {
   player.isPlayer = true;
   player.target = enemy; enemy.target = player;
   world.mechs = [player, enemy];
+  const trailColor = (m) => (m.typeId === 'kestrel' ? 0x5dc8ff : 0xff8040);
   battle = {
+    trails: [new MechTrails(scene, player, trailColor(player)), new MechTrails(scene, enemy, trailColor(enemy))],
     player, enemy,
     ai: null,
     round: 0, pw: 0, ew: 0, phase: 'intro', phaseT: 0, timeLeft: ROUND_TIME, hitStop: 0,
@@ -203,6 +207,7 @@ function startRound() {
   arena.clearScorch();
   b.player.reset(new THREE.Vector3(-20, 0, -62), 0.3);
   b.enemy.reset(new THREE.Vector3(20, 0, 62), Math.PI + 0.3);
+  for (const t of b.trails) t.hide();
   b.ai = new AIController(b.enemy, b.player, world, settings.difficulty);
   b.ai2 = null;
   b.phase = 'intro'; b.phaseT = 0; b.timeLeft = ROUND_TIME; b.msgStage = 0;
@@ -221,6 +226,12 @@ world.onHit = (attacker, victim, dmg, at, hit = {}) => {
   else if (attacker === battle.player) { followCam.shake(heavy ? 0.6 : 0.25); battle.stats.dealt += dmg; battle.stats.hits++; hud.damage(at, dmg, camera, false); }
   if (heavy && (victim === battle.player || attacker === battle.player)) followCam.kick(7);
 };
+world.onOverdrive = (m) => {
+  world.fx.ring(m.center.clone(), 0xff5ad0, 9, 0.5);
+  world.fx.burst(m.center.clone(), 0xff9ae8, 30, 16, 0.4, 0.5);
+  world.fx.light(m.center.clone(), 0xff5ad0, 20, 0.4);
+  if (battle && m === battle.player) { hud.flash(0.35); followCam.kick(6); hud.message('OVERDRIVE', 'od', 0.9); }
+};
 // Hit stop: freezes both mechs (and projectiles) for a few frames.
 world.hitStop = (sec) => { if (battle) battle.hitStop = Math.max(battle.hitStop, sec); };
 world.onShake = (who, a) => followCam.shake(battle && who === battle.player ? a : a * 0.4);
@@ -228,25 +239,31 @@ world.onShake = (who, a) => followCam.shake(battle && who === battle.player ? a 
 // ------------------------------------------------------------------ player command
 const NO_CMD = { move: new THREE.Vector3(), boost: false, boostPressed: false, bd: false, step: null };
 // Short input buffer so a step / BD / melee pressed during landing lag or hit stop still comes out.
-const buf = { step: null, stepT: 0, melee: 0, bd: 0, shoot: 0, missile: 0, special: 0, overdrive: 0 };
+const buf = { step: null, stepT: 0, melee: 0, meleeDir: 'n', meleeSide: 1, bd: 0, shoot: 0, missile: 0, special: 0, overdrive: 0 };
 const ONE_SHOTS = ['shoot', 'missile', 'special', 'overdrive'];
 function playerCmd(dt) {
   const mv = followCam.toWorld(input.move.x, input.move.z);
   if (input.step) { buf.step = input.step; buf.stepT = 0.15; }
   else if ((buf.stepT -= dt) <= 0) buf.step = null;
-  if (input.hit('melee')) buf.melee = 0.12; else buf.melee -= dt;
+  if (input.hit('melee')) {
+    // direction + melee picks the attack: forward = thrust, side = curving slash, back = shield guard
+    buf.melee = 0.12;
+    const { x, z } = input.move;
+    buf.meleeDir = z > 0.5 && z >= Math.abs(x) ? 'f' : z < -0.5 && -z >= Math.abs(x) ? 'b' : Math.abs(x) > 0.5 ? 's' : 'n';
+    buf.meleeSide = x > 0 ? -1 : 1; // curve toward the pressed screen side
+  } else buf.melee -= dt;
   if (input.hit('bd')) buf.bd = 0.12; else buf.bd -= dt;
   for (const k of ONE_SHOTS) { if (input.hit(k)) buf[k] = 0.1; else buf[k] -= dt; }
   const step = buf.step ? followCam.toWorld(buf.step.x, buf.step.z) : null;
   return {
     move: mv, boost: input.down('boost'), boostPressed: input.hit('boost'), bd: buf.bd > 0,
-    step, shoot: buf.shoot > 0, melee: buf.melee > 0, missile: buf.missile > 0, special: buf.special > 0, overdrive: buf.overdrive > 0,
+    step, shoot: buf.shoot > 0, melee: buf.melee > 0, meleeDir: buf.meleeDir, meleeSide: buf.meleeSide, missile: buf.missile > 0, special: buf.special > 0, overdrive: buf.overdrive > 0,
   };
 }
 // Clear buffers once the mech has acted on them.
 function consumeBuffers(m, prevState, prevSerial, prev) {
   if (m.stepSerial !== prevSerial) buf.step = null;
-  if (m.state === 'melee' && (prevState !== 'melee' || m.meleeQueued)) buf.melee = 0;
+  if ((m.state === 'melee' && (prevState !== 'melee' || m.meleeQueued)) || (m.state === 'guard' && prevState !== 'guard')) buf.melee = 0;
   if (m.state === 'bd' && prevState !== 'bd') buf.bd = 0;
   if (m.ammo.rifle !== prev.rifle || m.state === 'turnshot') buf.shoot = 0;
   if (m.ammo.missile !== prev.missile) buf.missile = 0;
@@ -302,7 +319,9 @@ function updateBattle(dt) {
       b.koBoom++;
       for (const m of [player, enemy]) {
         if (m.alive) continue;
-        world.fx.explosion(m.center.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3)), 1.2);
+        const at = m.center.clone().add(new THREE.Vector3((Math.random() - 0.5) * 3, Math.random() * 2, (Math.random() - 0.5) * 3));
+        if (b.koBoom === 6) { world.fx.bigExplosion(m.center.clone()); m.hidden = true; }
+        else world.fx.explosion(at, 1.2);
         world.audio?.play('explode');
         followCam.shake(0.4);
       }
@@ -335,6 +354,7 @@ function updateBattle(dt) {
     world.weapons.update(sdt);
   }
   world.fx.update(sdt);
+  for (const t of b.trails) t.update(b.hitStop > 0 ? 0 : sdt, world.fx, camera.position);
   world.audio?.setBoost(player.boosting);
   followCam.update(dt, player, enemy);
   arena.updateOcclusion(dt, camera.position, [player.center, enemy.center]);

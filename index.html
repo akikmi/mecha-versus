@@ -19,7 +19,8 @@
 <div id="hud" class="hidden">
   <div id="enemy-panel">
     <div class="name" id="enemy-name">ENEMY</div>
-    <div class="bar"><div class="fill hp" id="enemy-hp"></div></div>
+    <div class="ehp"><div class="bar"><div class="fill hp" id="enemy-hp"></div></div><span id="enemy-hpnum">600</span></div>
+    <div class="eod"><span class="label">OD</span><div class="bar od"><div class="fill" id="enemy-od"></div></div></div>
   </div>
   <div id="round-info">
     <div id="round-dots-p" class="dots"></div>
@@ -30,21 +31,27 @@
     <div class="name" id="player-name">PLAYER</div>
     <div class="hpnum"><span id="player-hpnum">600</span></div>
     <div class="bar"><div class="fill hp" id="player-hp"></div></div>
+    <div class="label">OVERDRIVE <span id="od-state"></span></div>
+    <div class="bar od"><div class="fill" id="player-od"></div></div>
+  </div>
+  <div id="boost-panel">
     <div class="label">BOOST</div>
     <div class="bar boost"><div class="fill" id="player-boost"></div></div>
   </div>
   <div id="weapon-panel">
-    <div class="weapon" id="w-rifle"><span class="key">J</span><span class="wname"></span><span class="ammo"></span><div class="reload"><div></div></div></div>
-    <div class="weapon" id="w-missile"><span class="key">L</span><span class="wname"></span><span class="ammo"></span><div class="reload"><div></div></div></div>
-    <div class="weapon" id="w-melee"><span class="key">K</span><span class="wname"></span><span class="ammo">&#8734;</span></div>
+    <div class="weapon" id="w-rifle"><span class="key">J</span><span class="wname"></span><span class="pips"></span><div class="reload"><div></div></div></div>
+    <div class="weapon" id="w-missile"><span class="key">L</span><span class="wname"></span><span class="pips"></span><div class="reload"><div></div></div></div>
     <div class="weapon" id="w-special"><span class="key">I</span><span class="wname"></span><span class="ammo"></span><div class="reload"><div></div></div></div>
+    <div class="weapon" id="w-melee"><span class="key">K</span><span class="wname"></span><span class="ammo">&#8734;</span></div>
   </div>
   <div id="lock"><div class="ring"></div><div class="dist"></div></div>
   <div id="alert">ALERT</div>
+  <div id="offscreen"><div class="osa">!</div><div class="osa">!</div><div class="osa">!</div></div>
   <div id="center-msg"></div>
   <div id="dmg-layer"></div>
-  <div id="hint">WASD 移動 / Space 長押し 上昇・2回押し BD / 方向2回 ステップ / J 射撃 / K 格闘 / L ミサイル / I 特殊射撃 / Esc ポーズ</div>
+  <div id="hint">Space×2 BD / 方向×2 ステップ / J 射撃 / K 格闘 (方向+K) / L ミサイル / I 特殊 / O OVERDRIVE / Esc</div>
 </div>
+<div id="flash"></div>
 
 <div id="title" class="screen">
   <div class="logo">MECHA<span>VERSUS</span></div>
@@ -68,13 +75,17 @@
     <tr><td>慣性ジャンプ</td><td>BD 中に Space を離してもう一度押す</td><td>A を離して押す</td></tr>
     <tr><td>ステップ (誘導切り)</td><td>方向キーを素早く2回</td><td>LB + スティック</td></tr>
     <tr><td>ビームライフル</td><td>J</td><td>X / RT</td></tr>
-    <tr><td>格闘 (3段)</td><td>K 連打</td><td>B</td></tr>
+    <tr><td>格闘 (3段、最後は打ち上げ)</td><td>K 連打</td><td>B</td></tr>
+    <tr><td>横格闘 (回り込み、最後は吹き飛ばし)</td><td>A/D + K</td><td>スティック横 + B</td></tr>
+    <tr><td>前格闘 (突進突き)</td><td>W + K</td><td>スティック前 + B</td></tr>
+    <tr><td>後格闘 (シールド防御)</td><td>S + K</td><td>スティック後 + B</td></tr>
     <tr><td>ミサイル</td><td>L</td><td>Y</td></tr>
     <tr><td>特殊射撃 (チャージ)</td><td>I</td><td>RB</td></tr>
+    <tr><td>OVERDRIVE (ゲージ満タン時)</td><td>O</td><td>LT</td></tr>
     <tr><td>ポーズ</td><td>Esc / P</td><td>Start</td></tr>
     <tr><td>サウンド ON/OFF</td><td>M</td><td>-</td></tr>
   </table>
-  <p>ロックオンは自動。距離が近いと赤ロック（弾が誘導）、遠いと緑ロック（誘導なし）。射撃・特殊射撃はステップか BD で、格闘は BD・ステップでキャンセルできる。格闘が当たった後に L でミサイルへ派生。敵が背後にいると振り向き撃ちになり足が止まる。ブーストを使い切るとオーバーヒートして着地硬直が長くなる。</p>
+  <p>ロックオンは自動。ロックカーソルが赤なら弾が誘導する、緑なら誘導しない、黄なら射程外。画面外から撃たれると「!」が出る。射撃・特殊射撃はステップか BD で、格闘は BD・ステップでキャンセルできる。格闘が当たった後に L でミサイルへ派生。敵が背後にいると振り向き撃ちになり足が止まる。後格闘のシールドは正面からの射撃と格闘を防ぐ。OVERDRIVE ゲージはダメージを与えても受けても溜まり、発動すると 8 秒間 機動力と攻撃力が上がり、ブーストが全回復する（被弾中でも発動して抜けられる）。ブーストを使い切るとオーバーヒートして着地硬直が長くなる。</p>
   <div class="menu"><button data-act="back">BACK</button></div>
 </div>
 
