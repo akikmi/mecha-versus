@@ -5,6 +5,7 @@ import { Mech } from './mech.js';
 import { FollowCamera } from './camera.js';
 import { FX } from './fx.js';
 import { Weapons } from './weapons.js';
+import { AIController } from './ai.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -33,6 +34,9 @@ world.onHit = (attacker, victim, dmg) => {
 };
 world.onShake = (who, a) => followCam.shake(who === player ? a : a * 0.4);
 followCam.snap(player, enemy);
+const ai = new AIController(enemy, player, world, new URLSearchParams(location.search).get('cpu') || 'normal');
+const demo = new URLSearchParams(location.search).has('demo');
+const ai2 = demo ? new AIController(player, enemy, world, 'normal') : null;
 
 const idle = { move: { x: 0, z: 0 }, boost: false, boostPressed: false, step: null, stepHold: false };
 
@@ -78,9 +82,9 @@ function frame(now) {
   last = now;
   input.update();
   const ps = player.state, pss = player.stepSerial;
-  player.update(dt, playerCmd(dt), world);
+  player.update(dt, ai2 ? ai2.update(dt) : playerCmd(dt), world);
   consumeBuffers(player, ps, pss);
-  enemy.update(dt, idle, world);
+  enemy.update(dt, ai.update(dt), world);
   separate(player, enemy);
   world.weapons.update(dt);
   world.fx.update(dt);
