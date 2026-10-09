@@ -11,6 +11,7 @@ const KEYMAP = {
   KeyK: 'melee',
   KeyL: 'missile',
   KeyI: 'special',
+  KeyO: 'overdrive',
   Enter: 'confirm',
   Escape: 'pause', KeyP: 'pause',
   Backspace: 'back',
@@ -19,9 +20,10 @@ const KEYMAP = {
 
 const DIRS = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] };
 const DOUBLE_TAP_MS = 260;
+const BD_TAP_MS = 300;
 
-// Standard gamepad mapping
-const PAD = { boost: 0, melee: 1, shoot: 2, missile: 3, step: 4, special: 5, shoot2: 7, back: 8, pause: 9 };
+// Standard gamepad mapping (A boost / double-tap A = BD, LB + stick = step, LT = OVERDRIVE)
+const PAD = { boost: 0, melee: 1, shoot: 2, missile: 3, step: 4, special: 5, overdrive: 6, shoot2: 7, back: 8, pause: 9 };
 
 export class Input {
   constructor() {
@@ -33,6 +35,7 @@ export class Input {
     this.padPrev = [];
     this.padActive = false;
     this.padStepPrev = false;
+    this.lastBoostTap = 0;
 
     addEventListener('keydown', (e) => {
       const a = KEYMAP[e.code];
@@ -41,7 +44,7 @@ export class Input {
       if (e.repeat) return;
       this.held.add(a);
       this.pressedSet.add(a);
-      if (a === 'boost') this.pressedSet.add('confirm'); // Space also confirms in menus
+      if (a === 'boost') { this.pressedSet.add('confirm'); this.boostTap(); } // Space also confirms in menus
       if (DIRS[a]) {
         const now = performance.now();
         if (this.lastTap[a] && now - this.lastTap[a] < DOUBLE_TAP_MS) {
@@ -59,6 +62,13 @@ export class Input {
       this.held.delete(a);
     });
     addEventListener('blur', () => { this.held.clear(); });
+  }
+
+  // Second boost press within BD_TAP_MS = boost dash.
+  boostTap() {
+    const now = performance.now();
+    if (now - this.lastBoostTap < BD_TAP_MS) { this.pressedSet.add('bd'); this.lastBoostTap = 0; }
+    else this.lastBoostTap = now;
   }
 
   // Call once per frame before reading.
@@ -88,7 +98,14 @@ export class Input {
         const now = b(idx);
         const act = name === 'shoot2' ? 'shoot' : name;
         if (now) this.padHeld.add(act);
-        if (now && !this.padPrev[idx]) { this.pressed.add(act); if (act === 'boost') this.pressed.add('confirm'); }
+        if (now && !this.padPrev[idx]) {
+          this.pressed.add(act);
+          if (act === 'boost') {
+            this.pressed.add('confirm');
+            const t = performance.now();
+            if (t - this.lastBoostTap < BD_TAP_MS) { this.pressed.add('bd'); this.lastBoostTap = 0; } else this.lastBoostTap = t;
+          }
+        }
         this.padPrev[idx] = now;
       }
       for (const [name, idx] of Object.entries(dpad)) {
@@ -111,6 +128,4 @@ export class Input {
 
   down(a) { return this.held.has(a) || (this.padHeld && this.padHeld.has(a)); }
   hit(a) { return this.pressed && this.pressed.has(a); }
-  // Whether the key that triggered the current step is still held (for step -> boost dash).
-  stepHeld(dir) { return dir === 'pad' ? this.padHeld.has('step') || Math.hypot(this.move.x, this.move.z) > 0.5 : this.held.has(dir); }
 }

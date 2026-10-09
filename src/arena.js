@@ -26,11 +26,13 @@ export class Arena {
     scene.background = new THREE.Color(0x0b1424);
     scene.fog = new THREE.Fog(0x0b1424, 90, 260);
 
-    const hemi = new THREE.HemisphereLight(0xa8c8ff, 0x1a1a24, 1.1);
+    const hemi = new THREE.HemisphereLight(0xa8c8ff, 0x1a1a24, 0.4);
     this.group.add(hemi);
-    const sun = new THREE.DirectionalLight(0xfff0dd, 1.6);
+    const sun = new THREE.DirectionalLight(0xfff0dd, 1.9);
     sun.position.set(40, 80, 30);
-    this.group.add(sun);
+    this.group.add(sun, sun.target);
+    this.sun = sun;
+    this.buildings = [];
 
     // Floor: disc with a grid texture drawn on a canvas
     const tex = makeGridTexture();
@@ -41,6 +43,7 @@ export class Arena {
       new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, metalness: 0.1 }),
     );
     floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
     this.group.add(floor);
 
     // Outer floor (outside the walls)
@@ -85,11 +88,13 @@ export class Arena {
       const mat = new THREE.MeshStandardMaterial({ color: 0x8a96a8, map: t, roughness: 0.7, metalness: 0.2, emissive: 0x223355, emissiveIntensity: 0.25 });
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
       m.position.set(x, h / 2, z);
-      this.group.add(m);
-      const top = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.5, d + 0.4), new THREE.MeshStandardMaterial({ color: 0x3a4250 }));
+      const topMat = new THREE.MeshStandardMaterial({ color: 0x3a4250 });
+      const top = new THREE.Mesh(new THREE.BoxGeometry(w + 0.4, 0.5, d + 0.4), topMat);
       top.position.set(x, h + 0.25, z);
-      this.group.add(top);
-      this.boxes.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h: h + 0.5 });
+      for (const o of [m, top]) { o.castShadow = o.receiveShadow = true; this.group.add(o); }
+      const box = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, h: h + 0.5 };
+      this.boxes.push(box);
+      this.buildings.push({ box, mats: [mat, topMat], opacity: 1, want: 1 });
     }
 
     // Distant skyline (decorative, outside the arena)
@@ -102,6 +107,12 @@ export class Arena {
       b.position.set(Math.sin(a) * r, h / 2, Math.cos(a) * r);
       this.group.add(b);
     }
+    this.dimEnvironment(0.35);
+  }
+
+  // Tone down image-based lighting on the static set (RoomEnvironment is bright).
+  dimEnvironment(k) {
+    this.group.traverse((o) => { if (o.isMesh && o.material.isMeshStandardMaterial) o.material.envMapIntensity = k; });
   }
 
   // Ground height at a point for a body of radius r, given current feet y.
@@ -155,6 +166,42 @@ export class Arena {
     return false;
   }
 
+  // Distance along a ray (unit dir) to the first building (boxes inflated by pad) or the floor; Infinity if none within max.
+  rayDistance(o, dir, max, pad = 0) {
+    let best = max;
+    for (const b of this.boxes) {
+      const t = rayBox(o, dir, b.minX - pad, b.maxX + pad, -1, b.h + pad, b.minZ - pad, b.maxZ + pad);
+      if (t >= 0 && t < best) best = t;
+    }
+    return best < max ? best : Infinity;
+  }
+
+  // Fade buildings that hide the player or the enemy from the camera.
+  updateOcclusion(dt, cam, points) {
+    for (const bd of this.buildings) {
+      const b = bd.box;
+      let hide = false;
+      for (const p of points) {
+        const dx = p.x - cam.x, dy = p.y - cam.y, dz = p.z - cam.z;
+        const len = Math.hypot(dx, dy, dz);
+        if (len < 1e-3) continue;
+        _dir.set(dx / len, dy / len, dz / len);
+        const t = rayBox(cam, _dir, b.minX, b.maxX, -1, b.h, b.minZ, b.maxZ);
+        if (t >= 0 && t < len - 1) { hide = true; break; }
+      }
+      bd.want = hide ? 0.25 : 1;
+      if (bd.opacity !== bd.want) {
+        bd.opacity += Math.sign(bd.want - bd.opacity) * Math.min(Math.abs(bd.want - bd.opacity), dt * 4);
+        const op = bd.opacity;
+        for (const m of bd.mats) {
+          const tr = op < 0.999;
+          if (m.transparent !== tr) { m.transparent = tr; m.depthWrite = !tr; m.needsUpdate = true; }
+          m.opacity = op;
+        }
+      }
+    }
+  }
+
   // Line of sight test (coarse sampling)
   lineBlocked(a, b) {
     const steps = Math.ceil(a.distanceTo(b) / 2);
@@ -165,6 +212,21 @@ export class Arena {
     }
     return false;
   }
+}
+
+const _dir = new THREE.Vector3();
+// Slab test: distance along the ray to the box entry point (0 if starting inside), -1 if missed.
+function rayBox(o, d, x0, x1, y0, y1, z0, z1) {
+  let tmin = 0, tmax = Infinity;
+  const ax = [[o.x, d.x, x0, x1], [o.y, d.y, y0, y1], [o.z, d.z, z0, z1]];
+  for (const [p, v, lo, hi] of ax) {
+    if (Math.abs(v) < 1e-8) { if (p < lo || p > hi) return -1; continue; }
+    let t1 = (lo - p) / v, t2 = (hi - p) / v;
+    if (t1 > t2) { const t = t1; t1 = t2; t2 = t; }
+    tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+    if (tmin > tmax) return -1;
+  }
+  return tmin;
 }
 
 function makeGridTexture() {

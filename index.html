@@ -3,17 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-3EKBmh+Rg7umrJDA9IYqcCW165Xz1aQ30cIyhNIQkS4='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-5wA3Z8E0Y0OTGN2sJH6JJETuF5CYTp6eGDxFbK0Gl1s='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Mecha Versus</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="./style.css">
 <script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
+{ "imports": { "three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/" } }
 </script>
 </head>
 <body>
 <div id="game"></div>
+<div id="fps" class="hidden"></div>
 
 <div id="hud" class="hidden">
   <div id="enemy-panel">
@@ -42,7 +43,7 @@
   <div id="alert">ALERT</div>
   <div id="center-msg"></div>
   <div id="dmg-layer"></div>
-  <div id="hint">WASD 移動 / Space ブースト / 方向2回 ステップ / J 射撃 / K 格闘 / L ミサイル / I 特殊射撃 / Esc ポーズ / M 音</div>
+  <div id="hint">WASD 移動 / Space 長押し 上昇・2回押し BD / 方向2回 ステップ / J 射撃 / K 格闘 / L ミサイル / I 特殊射撃 / Esc ポーズ</div>
 </div>
 
 <div id="title" class="screen">
@@ -51,6 +52,7 @@
   <div class="menu" id="title-menu">
     <button data-act="start">START</button>
     <button data-act="difficulty">CPU: <span id="diff-label">NORMAL</span></button>
+    <button data-act="graphics">GRAPHICS: <span id="gfx-label">HIGH</span></button>
     <button data-act="controls">CONTROLS</button>
   </div>
   <div class="foot">Enter / Space / A で決定 ・ W/S で選択 ・ M でサウンド <span id="sound-label">ON</span></div>
@@ -61,8 +63,9 @@
   <table>
     <tr><th>操作</th><th>キーボード</th><th>ゲームパッド</th></tr>
     <tr><td>移動</td><td>W A S D</td><td>左スティック</td></tr>
-    <tr><td>ジャンプ / ブースト上昇</td><td>Space (長押しで上昇)</td><td>A</td></tr>
-    <tr><td>ブーストダッシュ</td><td>Space + 方向 / 方向2回押しのまま保持</td><td>A + スティック</td></tr>
+    <tr><td>ジャンプ / ブースト上昇</td><td>Space (長押しで上昇)</td><td>A (長押し)</td></tr>
+    <tr><td>ブーストダッシュ (BD)</td><td>Space 2回押し、押し続けて継続・方向で旋回</td><td>A 2回押し</td></tr>
+    <tr><td>慣性ジャンプ</td><td>BD 中に Space を離してもう一度押す</td><td>A を離して押す</td></tr>
     <tr><td>ステップ (誘導切り)</td><td>方向キーを素早く2回</td><td>LB + スティック</td></tr>
     <tr><td>ビームライフル</td><td>J</td><td>X / RT</td></tr>
     <tr><td>格闘 (3段)</td><td>K 連打</td><td>B</td></tr>
@@ -71,7 +74,7 @@
     <tr><td>ポーズ</td><td>Esc / P</td><td>Start</td></tr>
     <tr><td>サウンド ON/OFF</td><td>M</td><td>-</td></tr>
   </table>
-  <p>ロックオンは自動。距離が近いと赤ロック（弾が誘導）、遠いと緑ロック（誘導なし）。ブーストを使い切るとオーバーヒートして着地硬直が長くなる。</p>
+  <p>ロックオンは自動。距離が近いと赤ロック（弾が誘導）、遠いと緑ロック（誘導なし）。射撃・特殊射撃はステップか BD で、格闘は BD・ステップでキャンセルできる。格闘が当たった後に L でミサイルへ派生。敵が背後にいると振り向き撃ちになり足が止まる。ブーストを使い切るとオーバーヒートして着地硬直が長くなる。</p>
   <div class="menu"><button data-act="back">BACK</button></div>
 </div>
 

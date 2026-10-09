@@ -106,7 +106,7 @@ export class FX {
       dummy.rotation.set(p.life * 7, p.life * 5, 0);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
-      col.copy(p.color).multiplyScalar(k);
+      col.copy(p.color).multiplyScalar(k * 2);
       mesh.setColorAt(i, col);
     }
     mesh.instanceMatrix.needsUpdate = true;

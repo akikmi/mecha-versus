@@ -109,3 +109,5 @@ canvas { display: block; }
   .hpnum { font-size: 28px; }
   .weapon { font-size: 11px; }
 }
+
+#fps { position: fixed; top: 6px; left: 8px; z-index: 50; font: 12px/1.2 ui-monospace, monospace; color: #9fff9f; background: rgba(0,0,0,.5); padding: 2px 6px; pointer-events: none; }

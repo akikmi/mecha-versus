@@ -8,8 +8,8 @@ const tmp = new THREE.Vector3();
 const tmp2 = new THREE.Vector3();
 const seg = new THREE.Vector3();
 
-function additive(color, opacity = 1) {
-  return new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+function additive(color, opacity = 1, k = 1) {
+  return new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k), transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 }
 
 // closest distance between point c and segment a-b
@@ -32,9 +32,9 @@ export class Weapons {
     this.mats = new Map();
   }
 
-  mat(color, op) {
-    const k = color + ':' + op;
-    if (!this.mats.has(k)) this.mats.set(k, additive(color, op));
+  mat(color, op, intensity = 1) {
+    const k = color + ':' + op + ':' + intensity;
+    if (!this.mats.has(k)) this.mats.set(k, additive(color, op, intensity));
     return this.mats.get(k);
   }
 
@@ -45,9 +45,9 @@ export class Weapons {
 
   makeBeamObj(color, radius, len) {
     const g = new THREE.Group();
-    const outer = new THREE.Mesh(beamGeo, this.mat(color, 0.55));
+    const outer = new THREE.Mesh(beamGeo, this.mat(color, 0.55, 2.4));
     outer.scale.set(radius * 1.6, radius * 1.6, len);
-    const core = new THREE.Mesh(beamGeo, this.mat(0xffffff, 0.95));
+    const core = new THREE.Mesh(beamGeo, this.mat(0xffffff, 0.95, 3));
     core.scale.set(radius * 0.6, radius * 0.6, len * 0.95);
     g.add(outer, core);
     return g;
@@ -62,14 +62,14 @@ export class Weapons {
   }
 
   aimPoint(owner, target) {
-    return target ? target.center.clone() : owner.pos.clone().add(owner.forward().multiplyScalar(50)).setY(owner.pos.y + 2.8);
+    return target ? target.center.clone() : owner.pos.clone().add(owner.aimForward().multiplyScalar(50)).setY(owner.pos.y + 2.8);
   }
 
   fireBeam(owner, target) {
     const s = owner.stats.rifle;
     const from = owner.model.muzzle.getWorldPosition(new THREE.Vector3());
     // muzzle can lag the aim pose by a frame: fall back to a point in front of the chest
-    const chest = owner.pos.clone().setY(owner.pos.y + 3.4).add(owner.forward().multiplyScalar(2.2));
+    const chest = owner.pos.clone().setY(owner.pos.y + 3.4).add(owner.aimForward().multiplyScalar(2.2));
     if (from.distanceTo(chest) > 3) from.copy(chest);
     const dir = this.aimPoint(owner, target).sub(from).normalize();
     this.spawn({
@@ -84,15 +84,15 @@ export class Weapons {
 
   fireMissiles(owner, target) {
     const s = owner.stats.missile;
-    const right = new THREE.Vector3(-Math.cos(owner.yaw), 0, Math.sin(owner.yaw));
-    const fwd = owner.forward();
+    const right = new THREE.Vector3(-Math.cos(owner.aimYaw), 0, Math.sin(owner.aimYaw));
+    const fwd = owner.aimForward();
     for (let i = 0; i < s.count; i++) {
       const side = (i % 2 === 0 ? 1 : -1) * (1 + Math.floor(i / 2) * 0.5);
       const from = owner.pos.clone().setY(owner.pos.y + 4.4).addScaledVector(right, side * 1.4);
       const vel = fwd.clone().multiplyScalar(0.6).addScaledVector(right, side * 0.5).add(new THREE.Vector3(0, 0.7, 0)).normalize().multiplyScalar(s.speed * 0.7);
       const obj = new THREE.Group();
       const body = new THREE.Mesh(this.missileGeo, this.missileMat);
-      const glow = new THREE.Mesh(beamGeo, this.mat(0xffaa44, 0.8));
+      const glow = new THREE.Mesh(beamGeo, this.mat(0xffaa44, 0.8, 3));
       glow.scale.set(0.25, 0.25, 0.6); glow.position.z = -0.7;
       obj.add(body, glow);
       this.spawn({
@@ -126,7 +126,9 @@ export class Weapons {
     const dmg = target.takeHit(hit, attacker);
     if (dmg > 0) {
       const at = target.center.clone();
-      this.world.fx?.hitSpark(at, attacker.stats.melee && attacker.model.saber.children[1].material.color.getHex());
+      // hit stop: freeze both mechs for a few frames (longer on the finisher)
+      this.world.hitStop?.(hit.stage === 2 ? 0.12 : 0.07, [attacker, target]);
+      this.world.fx?.hitSpark(at, attacker.model.saber.userData.color);
       this.world.audio?.play('slash');
       this.world.onHit?.(attacker, target, dmg, at, hit);
     }

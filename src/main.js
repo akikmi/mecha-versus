@@ -9,6 +9,7 @@ import { Weapons } from './weapons.js';
 import { AIController, DIFFICULTY } from './ai.js';
 import { HUD } from './hud.js';
 import { SFX } from './audio.js';
+import { GameRenderer } from './render.js';
 
 const WINS_NEEDED = 2;
 const ROUND_TIME = 99;
@@ -16,12 +17,13 @@ const SETTINGS_KEY = 'mecha-versus-settings';
 
 // ------------------------------------------------------------------ settings (localStorage only)
 function loadSettings() {
-  const def = { difficulty: 'normal', mech: 'kestrel', muted: false };
+  const def = { difficulty: 'normal', mech: 'kestrel', muted: false, graphics: 'high' };
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     if (DIFFICULTY[s.difficulty]) def.difficulty = s.difficulty;
     if (MECH_TYPES[s.mech]) def.mech = s.mech;
     def.muted = s.muted === true;
+    if (s.graphics === 'low') def.graphics = 'low';
   } catch { /* storage unavailable */ }
   return def;
 }
@@ -31,17 +33,15 @@ function saveSettings() {
 const settings = loadSettings();
 
 // ------------------------------------------------------------------ renderer / scene
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-document.getElementById('game').appendChild(renderer.domElement);
-
+const params = new URLSearchParams(location.search);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 1200);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 1200);
+const gfx = new GameRenderer(document.getElementById('game'), scene, camera, settings.graphics);
 const input = new Input();
 const arena = new Arena(scene);
+gfx.attachSun(arena.sun);
 const followCam = new FollowCamera(camera);
+followCam.arena = arena;
 const hud = new HUD();
 
 const world = { arena, scene, mechs: [] };
@@ -49,10 +49,7 @@ world.fx = new FX(scene);
 world.weapons = new Weapons(scene, world);
 world.audio = new SFX(settings.muted);
 
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
+addEventListener('resize', () => gfx.resize());
 
 // ------------------------------------------------------------------ showcase models (title / select)
 const ROOF_Y = 14.5;
@@ -98,6 +95,9 @@ const diffLabel = document.getElementById('diff-label');
 const order = ['easy', 'normal', 'hard'];
 function renderDiff() { diffLabel.textContent = DIFFICULTY[settings.difficulty].label; }
 renderDiff();
+const gfxLabel = document.getElementById('gfx-label');
+function renderGfx() { gfxLabel.textContent = settings.graphics.toUpperCase(); }
+renderGfx();
 const soundLabel = document.getElementById('sound-label');
 function renderSound() { soundLabel.textContent = settings.muted ? 'OFF' : 'ON'; }
 renderSound();
@@ -106,6 +106,7 @@ const titleMenu = new Menu('title-menu', (act) => {
   if (act === 'start') setMode('select');
   if (act === 'difficulty') { settings.difficulty = order[(order.indexOf(settings.difficulty) + 1) % 3]; saveSettings(); renderDiff(); }
   if (act === 'controls') setMode('controls');
+  if (act === 'graphics') { settings.graphics = settings.graphics === 'high' ? 'low' : 'high'; saveSettings(); gfx.setQuality(settings.graphics); renderGfx(); }
 });
 const controlsMenu = new Menu('controls', () => setMode('title'));
 const pauseMenu = new Menu('pause-menu', (act) => {
@@ -144,6 +145,7 @@ function setMode(m) {
   mode = m;
   if (m === 'title' || m === 'controls' || m === 'select') {
     showScreen(m);
+    followCam.resetFov();
     hud.show(false);
     showPreviews(true);
   }
@@ -182,7 +184,7 @@ function startBattle() {
   battle = {
     player, enemy,
     ai: null,
-    round: 0, pw: 0, ew: 0, phase: 'intro', phaseT: 0, timeLeft: ROUND_TIME,
+    round: 0, pw: 0, ew: 0, phase: 'intro', phaseT: 0, timeLeft: ROUND_TIME, hitStop: 0,
     stats: { dealt: 0, taken: 0, hits: 0 },
   };
   hud.setup(player, enemy, WINS_NEEDED);
@@ -202,39 +204,51 @@ function startRound() {
   b.ai2 = null;
   b.phase = 'intro'; b.phaseT = 0; b.timeLeft = ROUND_TIME; b.msgStage = 0;
   b.koBoom = 0;
+  b.hitStop = 0;
   followCam.snap(b.player, b.enemy);
   hud.setRounds(b.pw, b.ew);
   hud.message(b.round === 3 ? 'FINAL ROUND' : `ROUND ${b.round}`, '', 1.0);
   world.audio?.play('round');
 }
 
-world.onHit = (attacker, victim, dmg, at) => {
+world.onHit = (attacker, victim, dmg, at, hit = {}) => {
   if (!battle) return;
-  if (victim === battle.player) { followCam.shake(0.7); battle.stats.taken += dmg; hud.damage(at, dmg, camera, true); }
-  else if (attacker === battle.player) { followCam.shake(0.25); battle.stats.dealt += dmg; battle.stats.hits++; hud.damage(at, dmg, camera, false); }
+  const heavy = hit.forceDown || dmg >= 85;
+  if (victim === battle.player) { followCam.shake(heavy ? 1.1 : 0.7); battle.stats.taken += dmg; hud.damage(at, dmg, camera, true); }
+  else if (attacker === battle.player) { followCam.shake(heavy ? 0.6 : 0.25); battle.stats.dealt += dmg; battle.stats.hits++; hud.damage(at, dmg, camera, false); }
+  if (heavy && (victim === battle.player || attacker === battle.player)) followCam.kick(7);
 };
+// Hit stop: freezes both mechs (and projectiles) for a few frames.
+world.hitStop = (sec) => { if (battle) battle.hitStop = Math.max(battle.hitStop, sec); };
 world.onShake = (who, a) => followCam.shake(battle && who === battle.player ? a : a * 0.4);
 
 // ------------------------------------------------------------------ player command
-const NO_CMD = { move: new THREE.Vector3(), boost: false, boostPressed: false, step: null, stepHold: false };
-// Short input buffer so a step/melee pressed during landing lag still comes out.
-const buf = { step: null, stepT: 0, stepDir: null, melee: 0 };
+const NO_CMD = { move: new THREE.Vector3(), boost: false, boostPressed: false, bd: false, step: null };
+// Short input buffer so a step / BD / melee pressed during landing lag or hit stop still comes out.
+const buf = { step: null, stepT: 0, melee: 0, bd: 0, shoot: 0, missile: 0, special: 0, overdrive: 0 };
+const ONE_SHOTS = ['shoot', 'missile', 'special', 'overdrive'];
 function playerCmd(dt) {
   const mv = followCam.toWorld(input.move.x, input.move.z);
-  if (input.step) { buf.step = input.step; buf.stepT = 0.15; buf.stepDir = input.step.dir; }
+  if (input.step) { buf.step = input.step; buf.stepT = 0.15; }
   else if ((buf.stepT -= dt) <= 0) buf.step = null;
   if (input.hit('melee')) buf.melee = 0.12; else buf.melee -= dt;
+  if (input.hit('bd')) buf.bd = 0.12; else buf.bd -= dt;
+  for (const k of ONE_SHOTS) { if (input.hit(k)) buf[k] = 0.1; else buf[k] -= dt; }
   const step = buf.step ? followCam.toWorld(buf.step.x, buf.step.z) : null;
   return {
-    move: mv, boost: input.down('boost'), boostPressed: input.hit('boost'),
-    step, stepHold: buf.stepDir ? input.stepHeld(buf.stepDir) : false,
-    shoot: input.hit('shoot'), melee: buf.melee > 0, missile: input.hit('missile'), special: input.hit('special'),
+    move: mv, boost: input.down('boost'), boostPressed: input.hit('boost'), bd: buf.bd > 0,
+    step, shoot: buf.shoot > 0, melee: buf.melee > 0, missile: buf.missile > 0, special: buf.special > 0, overdrive: buf.overdrive > 0,
   };
 }
 // Clear buffers once the mech has acted on them.
-function consumeBuffers(m, prevState, prevSerial) {
+function consumeBuffers(m, prevState, prevSerial, prev) {
   if (m.stepSerial !== prevSerial) buf.step = null;
   if (m.state === 'melee' && (prevState !== 'melee' || m.meleeQueued)) buf.melee = 0;
+  if (m.state === 'bd' && prevState !== 'bd') buf.bd = 0;
+  if (m.ammo.rifle !== prev.rifle || m.state === 'turnshot') buf.shoot = 0;
+  if (m.ammo.missile !== prev.missile) buf.missile = 0;
+  if (m.state === 'special') buf.special = 0;
+  if (prev.od !== m.overdriveT) buf.overdrive = 0;
 }
 
 // keep the two mechs from overlapping
@@ -250,7 +264,7 @@ function separate(a, b) {
 
 // ------------------------------------------------------------------ battle update
 // ?demo = CPU vs CPU attract mode (also handy for testing)
-const demo = new URLSearchParams(location.search).has('demo');
+const demo = params.has('demo');
 
 function updateBattle(dt) {
   const b = battle;
@@ -298,17 +312,30 @@ function updateBattle(dt) {
   }
 
   const sdt = dt * timeScale;
-  const ps = player.state, pss = player.stepSerial;
-  let pcmd = NO_CMD;
-  if (b.phase === 'fight') pcmd = demo ? (b.ai2 ||= new AIController(player, enemy, world, 'normal')).update(sdt) : playerCmd(sdt);
-  player.update(sdt, pcmd, world);
-  consumeBuffers(player, ps, pss);
-  enemy.update(sdt, b.phase === 'fight' ? b.ai.update(sdt) : NO_CMD, world);
-  separate(player, enemy);
-  world.weapons.update(sdt);
+  if (b.hitStop > 0) {
+    // hit stop: mechs and projectiles freeze, the victim shudders; inputs keep buffering
+    b.hitStop -= dt;
+    if (b.phase === 'fight' && !demo) playerCmd(0);
+    for (const m of [player, enemy]) {
+      m.model.root.position.copy(m.pos);
+      if (m.flash > 0) m.model.root.position.x += (Math.random() - 0.5) * 0.25;
+    }
+  } else {
+    const ps = player.state, pss = player.stepSerial;
+    const prev = { rifle: player.ammo.rifle, missile: player.ammo.missile, od: player.overdriveT };
+    let pcmd = NO_CMD;
+    if (b.phase === 'fight') pcmd = demo ? (b.ai2 ||= new AIController(player, enemy, world, 'normal')).update(sdt) : playerCmd(sdt);
+    player.update(sdt, pcmd, world);
+    if (!demo) consumeBuffers(player, ps, pss, prev);
+    enemy.update(sdt, b.phase === 'fight' ? b.ai.update(sdt) : NO_CMD, world);
+    separate(player, enemy);
+    world.weapons.update(sdt);
+  }
   world.fx.update(sdt);
   world.audio?.setBoost(player.boosting);
   followCam.update(dt, player, enemy);
+  arena.updateOcclusion(dt, camera.position, [player.center, enemy.center]);
+  gfx.setShadowFocus(player.pos);
   hud.update(dt, player, enemy, camera, world, b.timeLeft);
 
   if (input.hit('pause') && b.phase !== 'ko') setPaused(true);
@@ -352,6 +379,8 @@ function updateMenuCamera(dt) {
     camera.position.set(Math.sin(a) * 48, 26, Math.cos(a) * 48);
     camera.lookAt(0, ROOF_Y + 2, 0);
   }
+  arena.updateOcclusion(dt, camera.position, []);
+  gfx.setShadowFocus(new THREE.Vector3(0, 0, 0));
   world.fx.update(dt);
 }
 
@@ -366,10 +395,20 @@ function updateMenus() {
 }
 
 // ------------------------------------------------------------------ main loop
+// ?debug shows FPS
+const fpsEl = params.has('debug') ? document.getElementById('fps') : null;
+if (fpsEl) fpsEl.classList.remove('hidden');
+const fpsStat = { frames: 0, t: 0, fps: 0 };
 let last = performance.now();
 function frame(now) {
-  const dt = Math.max(0, Math.min(1 / 30, (now - last) / 1000));
+  const rawDt = Math.max(0, (now - last) / 1000);
+  const dt = Math.min(1 / 30, rawDt);
   last = now;
+  fpsStat.frames++; fpsStat.t += rawDt;
+  if (fpsStat.t >= 0.5) {
+    fpsStat.fps = fpsStat.frames / fpsStat.t; fpsStat.frames = 0; fpsStat.t = 0;
+    if (fpsEl) fpsEl.textContent = `${fpsStat.fps.toFixed(0)} FPS ${settings.graphics.toUpperCase()}`;
+  }
   input.update();
   if (input.hit('mute')) {
     settings.muted = !settings.muted; saveSettings();
@@ -387,15 +426,19 @@ function frame(now) {
     battle.player.update(dt, NO_CMD, world);
     battle.enemy.update(dt, NO_CMD, world);
     followCam.update(dt, battle.player, battle.enemy);
+    gfx.setShadowFocus(battle.player.pos);
     updateMenus();
   } else {
     updateMenuCamera(dt);
     updateMenus();
   }
-  renderer.render(scene, camera);
+  gfx.render(dt);
 }
 
 setMode('title');
 if (demo) startBattle();
-renderer.setAnimationLoop(frame);
-window.__game = { get battle() { return battle; }, get mode() { return mode; }, world, settings };
+gfx.renderer.setAnimationLoop(frame);
+window.__game = {
+  get battle() { return battle; }, get mode() { return mode; }, world, settings, followCam, camera, arena, gfx, fps: fpsStat,
+  setGraphics(q) { settings.graphics = q; gfx.setQuality(q); renderGfx(); },
+};

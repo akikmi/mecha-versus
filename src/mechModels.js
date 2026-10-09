@@ -3,10 +3,11 @@ import * as THREE from 'three';
 // Original mech designs built from primitives. Model faces +Z, feet at y=0, ~5.2 units tall.
 
 function std(color, opts = {}) {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.35, flatShading: true, ...opts });
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.35, flatShading: true, envMapIntensity: 0.7, ...opts });
 }
-function glow(color) {
-  return new THREE.MeshBasicMaterial({ color, toneMapped: false });
+// Unlit glow parts; HDR color (> 1) so the bloom pass picks them up.
+function glow(color, k = 3) {
+  return new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(k), toneMapped: false });
 }
 function box(w, h, d, mat, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -28,7 +29,7 @@ function pivot(parent, x, y, z) {
 function makeFlame(color) {
   const geo = new THREE.ConeGeometry(0.28, 1.6, 8, 1, true);
   geo.translate(0, 0.8, 0); // base at origin (nozzle), tip along +y
-  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.2), transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
   const m = new THREE.Mesh(geo, mat);
   return m;
 }
@@ -57,7 +58,8 @@ export function buildMechModel(typeId, palette) {
 function common(root) {
   const parts = {};
   parts.hips = pivot(root, 0, 2.55, 0);
-  parts.torso = pivot(parts.hips, 0, 0.3, 0);
+  parts.waist = pivot(parts.hips, 0, 0.3, 0); // upper-body twist joint
+  parts.torso = pivot(parts.waist, 0, 0, 0);
   return parts;
 }
 
@@ -226,12 +228,12 @@ function makeSaber(color, len, r, axe = false) {
   g.add(hilt);
   const blade = new THREE.Mesh(
     new THREE.CylinderGeometry(r, r, len, 8),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.5), transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }),
   );
   blade.rotation.x = Math.PI / 2;
   blade.position.z = len / 2 + 0.25;
   g.add(blade);
-  const core = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.4, r * 0.4, len, 6), glow(0xffffff));
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.4, r * 0.4, len, 6), glow(0xffffff, 4));
   core.rotation.x = Math.PI / 2;
   core.position.z = len / 2 + 0.25;
   g.add(core);
@@ -241,6 +243,7 @@ function makeSaber(color, len, r, axe = false) {
     g.add(head);
   }
   g.visible = false;
+  g.userData.color = color;
   return g;
 }
 
@@ -259,6 +262,12 @@ function legs(p, main, sub, dark, accent, w = 1) {
 }
 
 function finish(root, parts, extra) {
-  root.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
-  return { root, parts, ...extra };
+  const flashMats = new Set();
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const lit = o.material.isMeshStandardMaterial;
+    o.castShadow = lit; o.receiveShadow = lit;
+    if (lit) flashMats.add(o.material);
+  });
+  return { root, parts, flashMats: [...flashMats], ...extra };
 }

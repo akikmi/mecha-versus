@@ -30,7 +30,7 @@ export class AIController {
 
   update(dt) {
     const m = this.m, o = this.o, p = this.p;
-    const cmd = { move: new THREE.Vector3(), boost: false, boostPressed: false, step: null, stepHold: false, shoot: false, melee: false, missile: false, special: false };
+    const cmd = { move: new THREE.Vector3(), boost: false, boostPressed: false, bd: false, step: null, shoot: false, melee: false, missile: false, special: false };
     if (!m.alive || m.state === 'down' || m.state === 'hitstun') return cmd;
 
     const to = new THREE.Vector3(o.pos.x - m.pos.x, 0, o.pos.z - m.pos.z);
@@ -114,21 +114,22 @@ export class AIController {
     if (nearWall) cmd.move.add(new THREE.Vector3(-m.pos.x, 0, -m.pos.z).normalize().multiplyScalar(0.8));
     if (cmd.move.lengthSq() > 1) cmd.move.normalize();
 
-    // boost management: hop then hold, release when low so we land and refill
+    // boost management: start a boost dash (BD) and hold it, release when low so we land and refill
     if (wantBoost && !m.overheat) {
-      if (m.onGround) { cmd.boostPressed = true; cmd.boost = true; this.boostHold = true; }
-      else if (this.boostHold && m.boost > 22) cmd.boost = true;
+      if (!this.boostHold && m.state === 'free' && m.landLag <= 0 && m.boost > 35) { cmd.bd = true; cmd.boost = true; this.boostHold = true; }
+      else if (this.boostHold && m.boost > 22 && (m.state === 'bd' || m.state === 'step')) cmd.boost = true;
       else this.boostHold = false;
     } else this.boostHold = false;
 
     // stuck detection (pressed against a building)
     const hs = Math.hypot(m.vel.x, m.vel.z);
     if (cmd.move.lengthSq() > 0.3 && hs < 2 && m.state === 'free') this.stuckT += dt; else this.stuckT = 0;
-    if (this.stuckT > 0.8) { this.strafe *= -1; this.stuckT = 0; if (m.onGround && m.boost > 20) { cmd.boostPressed = true; cmd.boost = true; this.boostHold = true; } }
+    if (this.stuckT > 0.8) { this.strafe *= -1; this.stuckT = 0; if (m.onGround && m.boost > 20) { cmd.boostPressed = true; cmd.boost = true; this.jumpT = 0.5; } }
+    if (this.jumpT > 0) { this.jumpT -= dt; cmd.boost = true; }
 
     // ---- attacks
     this.shootT -= dt;
-    if (oVulnerable && this.shootT <= 0 && (m.state === 'free' || m.state === 'dash' || m.state === 'step')) {
+    if (oVulnerable && this.shootT <= 0 && (m.state === 'free' || m.state === 'bd' || m.state === 'step')) {
       const los = !this.world.arena.lineBlocked(m.center.clone(), o.center.clone());
       if (los && (red || Math.random() < 0.3)) {
         if (m.specialReady && red && dist > 18 && Math.random() < p.special) cmd.special = true;
