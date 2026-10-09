@@ -8,6 +8,7 @@ import { FX } from './fx.js';
 import { Weapons } from './weapons.js';
 import { AIController, DIFFICULTY } from './ai.js';
 import { HUD } from './hud.js';
+import { SFX } from './audio.js';
 
 const WINS_NEEDED = 2;
 const ROUND_TIME = 99;
@@ -15,11 +16,12 @@ const SETTINGS_KEY = 'mecha-versus-settings';
 
 // ------------------------------------------------------------------ settings (localStorage only)
 function loadSettings() {
-  const def = { difficulty: 'normal', mech: 'kestrel' };
+  const def = { difficulty: 'normal', mech: 'kestrel', muted: false };
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
     if (DIFFICULTY[s.difficulty]) def.difficulty = s.difficulty;
     if (MECH_TYPES[s.mech]) def.mech = s.mech;
+    def.muted = s.muted === true;
   } catch { /* storage unavailable */ }
   return def;
 }
@@ -45,7 +47,7 @@ const hud = new HUD();
 const world = { arena, scene, mechs: [] };
 world.fx = new FX(scene);
 world.weapons = new Weapons(scene, world);
-world.audio = null;
+world.audio = new SFX(settings.muted);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -96,6 +98,9 @@ const diffLabel = document.getElementById('diff-label');
 const order = ['easy', 'normal', 'hard'];
 function renderDiff() { diffLabel.textContent = DIFFICULTY[settings.difficulty].label; }
 renderDiff();
+const soundLabel = document.getElementById('sound-label');
+function renderSound() { soundLabel.textContent = settings.muted ? 'OFF' : 'ON'; }
+renderSound();
 
 const titleMenu = new Menu('title-menu', (act) => {
   if (act === 'start') setMode('select');
@@ -366,6 +371,11 @@ function frame(now) {
   const dt = Math.max(0, Math.min(1 / 30, (now - last) / 1000));
   last = now;
   input.update();
+  if (input.hit('mute')) {
+    settings.muted = !settings.muted; saveSettings();
+    world.audio.setMuted(settings.muted);
+    renderSound();
+  }
   if (mode === 'battle' && battle) {
     if (paused) {
       pauseMenu.update();

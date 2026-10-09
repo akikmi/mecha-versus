@@ -14,6 +14,7 @@ const KEYMAP = {
   Enter: 'confirm',
   Escape: 'pause', KeyP: 'pause',
   Backspace: 'back',
+  KeyM: 'mute',
 };
 
 const DIRS = { up: [0, 1], down: [0, -1], left: [-1, 0], right: [1, 0] };
