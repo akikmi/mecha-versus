@@ -3,6 +3,8 @@ import { Input } from './input.js';
 import { Arena } from './arena.js';
 import { Mech } from './mech.js';
 import { FollowCamera } from './camera.js';
+import { FX } from './fx.js';
+import { Weapons } from './weapons.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -21,7 +23,15 @@ const enemy = new Mech('grendel', scene);
 player.target = enemy; enemy.target = player;
 player.reset(new THREE.Vector3(0, 0, -45), 0);
 enemy.reset(new THREE.Vector3(0, 0, 45), Math.PI);
-const world = { arena, scene };
+player.isPlayer = true;
+const world = { arena, scene, mechs: [player, enemy] };
+world.fx = new FX(scene);
+world.weapons = new Weapons(scene, world);
+world.onHit = (attacker, victim, dmg) => {
+  if (victim === player) followCam.shake(0.6);
+  else if (attacker === player) followCam.shake(0.25);
+};
+world.onShake = (who, a) => followCam.shake(who === player ? a : a * 0.4);
 followCam.snap(player, enemy);
 
 const idle = { move: { x: 0, z: 0 }, boost: false, boostPressed: false, step: null, stepHold: false };
@@ -51,6 +61,17 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+// keep the two mechs from overlapping
+function separate(a, b) {
+  const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+  const d = Math.hypot(dx, dz), min = a.stats.radius + b.stats.radius;
+  if (d < min && Math.abs(a.pos.y - b.pos.y) < 4.5 && d > 1e-4) {
+    const push = (min - d) / 2;
+    a.pos.x -= dx / d * push; a.pos.z -= dz / d * push;
+    b.pos.x += dx / d * push; b.pos.z += dz / d * push;
+  }
+}
+
 let last = performance.now();
 function frame(now) {
   const dt = Math.max(0, Math.min(1 / 30, (now - last) / 1000));
@@ -60,8 +81,11 @@ function frame(now) {
   player.update(dt, playerCmd(dt), world);
   consumeBuffers(player, ps, pss);
   enemy.update(dt, idle, world);
+  separate(player, enemy);
+  world.weapons.update(dt);
+  world.fx.update(dt);
   followCam.update(dt, player, enemy);
   renderer.render(scene, camera);
 }
 renderer.setAnimationLoop(frame);
-window.__game = { player, enemy };
+window.__game = { player, enemy, world };

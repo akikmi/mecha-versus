@@ -335,7 +335,7 @@ export class Mech {
         tmpV.normalize();
         this.vel.copy(tmpV).multiplyScalar(m.lunge);
         this.yaw = Math.atan2(tmpV.x, tmpV.z);
-        if (dist < 3.0) { this.meleePhase = 'swing'; this.stateT = 0; }
+        if (dist < this.stats.radius + t.stats.radius + 0.8) { this.meleePhase = 'swing'; this.stateT = 0; }
       }
       if (this.stateT > 0.8) { this.meleePhase = 'swing'; this.stateT = 0; }
       return;
