@@ -70,7 +70,7 @@ export class GameRenderer {
         const rt = new THREE.WebGLRenderTarget(innerWidth * pr, innerHeight * pr, { type: THREE.HalfFloatType, samples: 4 });
         this.composer = new EffectComposer(r, rt);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
-        this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.4, 1.0);
+        this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.65, 0.4, 1.15);
         this.composer.addPass(this.bloom);
         this.composer.addPass(new OutputPass());
       }

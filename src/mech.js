@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { buildMechModel, MECH_TYPES } from './mechModels.js';
+import { Animator } from './anim.js';
 
 export const GRAVITY = 32;
 export const MAX_HP = 600;
@@ -44,6 +45,7 @@ export class Mech {
     this.name = name || this.info.name;
     this.stats = STATS[typeId];
     this.model = buildMechModel(typeId, palette);
+    this.anim = new Animator(this.model);
     scene.add(this.model.root);
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
@@ -84,10 +86,13 @@ export class Mech {
     this.flash = 0;
     this.hitDir = new THREE.Vector3(0, 0, 1);
     this.dashDir = new THREE.Vector3(0, 0, 1);
+    this.turnRate = 0;
+    this.overdriveT = 0;
     this.model.saber.visible = false;
     this.model.root.rotation.set(0, yaw, 0);
     this.model.root.position.copy(pos);
-    if (this.model.parts.waist) this.model.parts.waist.rotation.y = 0;
+    this.model.parts.waist.rotation.y = 0;
+    this.anim.reset();
   }
 
   get center() { return (this._c || (this._c = new THREE.Vector3())).copy(this.pos).setY(this.pos.y + 2.8); }
@@ -354,9 +359,11 @@ export class Mech {
       const cur = Math.atan2(this.dashDir.x, this.dashDir.z);
       const want = Math.atan2(mv.x, mv.z);
       const d = angleDiff(cur, want);
-      const a = cur + clamp(d, -3.0 * dt, 3.0 * dt);
+      const turn = clamp(d, -3.0 * dt, 3.0 * dt);
+      this.turnRate = dt > 0 ? turn / dt : 0;
+      const a = cur + turn;
       this.dashDir.set(Math.sin(a), 0, Math.cos(a));
-    }
+    } else this.turnRate = 0;
     const k = 1 - Math.exp(-8 * dt);
     this.vel.x += (this.dashDir.x * s.dash - this.vel.x) * k;
     this.vel.z += (this.dashDir.z * s.dash - this.vel.z) * k;
@@ -558,101 +565,7 @@ export class Mech {
     this.twist += (want - this.twist) * Math.min(1, (this.aimT > 0 ? 20 : 9) * dt);
   }
 
-  // ---------------------------------------------------------------- animation
-  animate(dt) {
-    const m = this.model;
-    const p = m.parts;
-    const root = m.root;
-    root.position.copy(this.pos);
-    root.rotation.order = 'YXZ';
-    root.rotation.y = this.yaw;
-
-    // reset pose
-    let hipsX = 0, torsoX = 0, legLX = 0, legRX = 0, shinL = 0, shinR = 0, armLX = 0, armRX = 0, armRZ = 0, armLZ = 0, rootX = 0, rootZ = 0, rifleX = 0, hipsY = 0;
-    const fwd = this.forward(new THREE.Vector3());
-    const localZ = this.vel.x * fwd.x + this.vel.z * fwd.z;
-    const localX = this.vel.x * fwd.z - this.vel.z * fwd.x;
-
-    if (this.state === 'down' || this.state === 'dead') {
-      rootX = -1.35;
-      legLX = -0.3; legRX = 0.2; armLX = -0.6; armRX = 0.4;
-    } else if (this.state === 'hitstun') {
-      const f = Math.max(0, 1 - this.stateT / 0.25);
-      torsoX = -0.5 - f * 0.3; armLX = -0.8; armRX = -0.5; legLX = 0.3; shinL = 0.4; rootX = -0.25 * f;
-    } else if (this.onGround && (this.state === 'free' || this.state === 'turnshot')) {
-      if (this.landLag > 0.05) {
-        const deep = this.zusa ? 0.7 : 1;
-        hipsY = -0.6 * deep; legLX = -0.7 * deep; legRX = -0.7 * deep; shinL = 1.2 * deep; shinR = 1.2 * deep; torsoX = 0.3;
-        if (this.zusa) { legLX = -1.0; legRX = 0.2; shinR = 0.5; rootX = -0.12; }
-      } else if (hs(this) > 1) {
-        const sp = hs(this);
-        this.animPhase += dt * sp * 0.55;
-        const sw = Math.sin(this.animPhase) * Math.min(1, sp / 10);
-        legLX = sw * 0.7; legRX = -sw * 0.7;
-        shinL = Math.max(0, -sw) * 0.9 + 0.1; shinR = Math.max(0, sw) * 0.9 + 0.1;
-        armLX = -sw * 0.4; armRX = sw * 0.4;
-        torsoX = 0.1;
-        hipsY = Math.abs(Math.cos(this.animPhase)) * 0.12;
-      } else {
-        hipsY = Math.sin(performance.now() / 600) * 0.03;
-      }
-    } else {
-      // airborne / bd / step
-      const lean = clamp(localZ / 30, -1, 1);
-      const side = clamp(localX / 30, -1, 1);
-      rootX = lean * (this.state === 'bd' ? 0.6 : 0.4);
-      rootZ = -side * 0.45;
-      legLX = 0.3 + lean * 0.5; legRX = 0.1 + lean * 0.7;
-      shinL = 0.6; shinR = 0.4 + lean * 0.3;
-      armLX = 0.3; armRX = 0.3;
-      if (this.state === 'turnshot') { rootX = 0; rootZ = 0; }
-    }
-
-    if (this.state === 'melee') {
-      const dur = this.stats.melee.swing;
-      const prog = this.meleePhase === 'lunge' ? 0 : Math.min(1, this.stateT / dur);
-      if (this.meleePhase === 'lunge') { armRX = -2.6; armRZ = 0.3; rootX = 0.5; legLX = 0.6; legRX = 0.2; shinL = 0.8; }
-      else if (this.meleeStage === 0) { armRX = -1.6; armRZ = 1.2 - prog * 2.6; torsoX = 0.2; rifleX = 0.6; }
-      else if (this.meleeStage === 1) { armRX = -1.6; armRZ = -1.4 + prog * 2.6; torsoX = 0.2; rifleX = 0.6; }
-      else { armRX = -3.0 + prog * 3.2; armRZ = 0; torsoX = -0.2 + prog * 0.6; rifleX = 0.4; }
-      armLX = -0.4;
-    } else if (this.aimT > 0 || this.state === 'special' || this.state === 'turnshot') {
-      // aim the gun arm, pitched toward the target height
-      let pitch = 0;
-      if (this.target) { const dy = this.target.pos.y - this.pos.y; pitch = Math.atan2(dy, Math.max(1, Math.hypot(this.target.pos.x - this.pos.x, this.target.pos.z - this.pos.z))); }
-      armRX = -Math.PI / 2 - pitch * 0.9 - rootX; rifleX = Math.PI / 2;
-      if (this.state === 'special') { armLX = -Math.PI / 2 * (this.typeId === 'kestrel' ? 1 : 0.3); torsoX = -0.1; }
-    }
-
-    const k = Math.min(1, 16 * dt);
-    const L = (obj, prop, v) => { obj[prop] += (v - obj[prop]) * k; };
-    L(root.rotation, 'x', rootX); L(root.rotation, 'z', rootZ);
-    L(p.hips.position, 'y', 2.55 + hipsY);
-    L(p.hips.rotation, 'x', hipsX);
-    L(p.torso.rotation, 'x', torsoX);
-    p.waist.rotation.y = this.twist;
-    p.head.rotation.y = clamp((this.target ? angleDiff(this.aimYaw, this.yawTo(this.target)) : 0), -0.6, 0.6);
-    L(p.legL.rotation, 'x', -legLX); L(p.legR.rotation, 'x', -legRX);
-    L(p.shinL.rotation, 'x', shinL); L(p.shinR.rotation, 'x', shinR);
-    L(p.armL.rotation, 'x', armLX); L(p.armR.rotation, 'x', armRX);
-    L(p.armR.rotation, 'z', armRZ); L(p.armL.rotation, 'z', armLZ);
-    L(m.rifle.rotation, 'x', rifleX);
-
-    // thruster flames
-    const fl = this.boosting ? 1.2 + Math.random() * 0.6 : (this.onGround ? 0.0 : 0.35);
-    for (const f of m.flames) {
-      f.visible = fl > 0.01;
-      f.scale.set(1, fl, 1);
-    }
-
-    // hit flash (white emissive) and invulnerability blink
-    const fk = this.flash > 0 ? this.flash / 0.16 : 0;
-    if (fk !== this._flashK) {
-      this._flashK = fk;
-      for (const mat of m.flashMats) mat.emissive.setScalar(fk * 1.6);
-    }
-    root.visible = !(this.invuln > 0 && Math.floor(this.invuln * 20) % 2 === 0);
-  }
+  // ---------------------------------------------------------------- animation (see anim.js)
+  animate(dt) { this.anim.update(dt, this); }
 }
 
-function hs(m) { return Math.hypot(m.vel.x, m.vel.z); }

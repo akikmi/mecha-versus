@@ -201,6 +201,9 @@ export class Weapons {
       // hit terrain
       if (!dead && world.arena.pointBlocked(p.pos)) {
         dead = true;
+        // scorch mark if it hit the floor or a roof (not a wall)
+        const g = world.arena.groundAt(p.pos.x, p.pos.z, 0, p.prev.y);
+        if (p.prev.y - g < 3 && p.pos.y - g < 1.5) world.arena.addScorch(tmp.set(p.pos.x, g, p.pos.z), p.kind === 'special' ? 6 : p.kind === 'missile' ? 3.5 : 2.5);
         if (p.kind === 'missile') { world.fx?.explosion(p.pos, 0.6); world.audio?.play('explode', 0.5); }
         else world.fx?.burst(p.pos, p.color, p.kind === 'special' ? 30 : 10, 10, 0.4, 0.4);
       }

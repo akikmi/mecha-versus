@@ -65,10 +65,11 @@ style.css
 src/main.js       起動・ゲームループ・画面遷移・ラウンド管理
 src/input.js      キーボード + Gamepad API
 src/mech.js       機体の移動・ブースト・状態遷移・被弾・ダウン
-src/mechModels.js プリミティブで作る機体モデル
+src/mechModels.js コードで作る機体モデル（角丸・面取り装甲・パネルラインのテクスチャ・材質ごとにマージ）
+src/anim.js       キーフレームのポーズ表とバネ減衰によるアニメーション・スカートなどの二次的な動き
 src/weapons.js    ビーム・ミサイル・特殊射撃・格闘判定・誘導
 src/ai.js         CPU の状態遷移と難易度
-src/arena.js      ステージ・障害物・当たり判定
+src/arena.js      夕方のステージ（空のシェーダー・窓の灯るビル・ネオン・道路）・焦げ跡・当たり判定
 src/camera.js     背後追従カメラ（ビル回避・FOV 演出）
 src/render.js     レンダラー・後処理（Bloom）・影・Graphics 設定
 src/hud.js        HUD

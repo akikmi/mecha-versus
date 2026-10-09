@@ -3,6 +3,7 @@ import { Input } from './input.js';
 import { Arena } from './arena.js';
 import { Mech, STATS } from './mech.js';
 import { buildMechModel, MECH_TYPES } from './mechModels.js';
+import { Animator } from './anim.js';
 import { FollowCamera } from './camera.js';
 import { FX } from './fx.js';
 import { Weapons } from './weapons.js';
@@ -59,6 +60,7 @@ for (const [i, id] of ['kestrel', 'grendel'].entries()) {
   // camera looks from -z, so +x is screen-left: kestrel left, grendel right (matches the cards)
   m.root.position.set(i === 0 ? 2.8 : -2.8, ROOF_Y, 0);
   m.root.rotation.y = Math.PI;
+  new Animator(m).reset();
   m.parts.armR.rotation.x = -0.3;
   scene.add(m.root);
   previews[id] = m;
@@ -198,6 +200,7 @@ function startRound() {
   b.round++;
   world.weapons.clear();
   world.fx.clear();
+  arena.clearScorch();
   b.player.reset(new THREE.Vector3(-20, 0, -62), 0.3);
   b.enemy.reset(new THREE.Vector3(20, 0, 62), Math.PI + 0.3);
   b.ai = new AIController(b.enemy, b.player, world, settings.difficulty);
@@ -410,6 +413,7 @@ function frame(now) {
     if (fpsEl) fpsEl.textContent = `${fpsStat.fps.toFixed(0)} FPS ${settings.graphics.toUpperCase()}`;
   }
   input.update();
+  arena.update(dt);
   if (input.hit('mute')) {
     settings.muted = !settings.muted; saveSettings();
     world.audio.setMuted(settings.muted);
